@@ -1,0 +1,1659 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Tank-Peilrechner v0.9 – DIN 6608 / 6616</title>
+  <!-- Sicherheitsrichtlinie (CSP): Es ist nur das unten stehende, unveränderte JavaScript erlaubt.
+       Bei jeder Änderung am JavaScript muss der SHA-256-Wert neu berechnet werden.
+       Stilregeln sind inline erlaubt, da Fortschrittsbalken dynamische CSS-Werte nutzen. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-euMnPiCzUEGTY0uBqxqXQrUSa08YmEqOG7+Q6Tmt9us='; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'">
+
+  <!--
+    TANK-PEILRECHNER v0.9
+    ====================
+    Diese einzelne HTML-Datei enthält:
+      1. Das Seitenlayout (HTML)
+      2. Das Design (<style> unten)
+      3. Die Original-Literwerte aus den Dehoust-Peiltabellen (<script> unten)
+      4. Die Berechnung für alle drei Register (ebenfalls <script>)
+      5. Optional die proportionale Umrechnung für einzelne Tankkammern
+      6. In Register 3 die Kammergröße aus zwei Peilhöhen und einer Mengendifferenz
+      7. Einen kleinen Download-Link nur für GitHub Pages (online)
+
+    Die Version v0.9 baut funktional und gestalterisch auf v0.6 auf.
+    Das Firmen-Design aus der zwischenzeitlichen v0.4 ist nicht enthalten.
+
+    Es werden KEINE externen Dateien, Schriftarten, Bibliotheken oder Server benötigt.
+    JavaScript ist nur für die automatische Berechnung und das Umschalten nötig.
+    Auf Apple-Geräten am besten über einen HTTPS-Weblink in Safari aufrufen;
+    die Vorschau in der Dateien-App führt JavaScript möglicherweise nicht aus.
+  -->
+
+  <style>
+    /* Grundgestaltung: mobilfreundlich, ohne externes Stylesheet. */
+    :root {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      color: #172b44;
+      background: #f1f5f9;
+      font-synthesis: none;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 20px 14px 32px; }
+    .app { max-width: 850px; margin: 0 auto; }
+    h1 { font-size: clamp(26px, 5vw, 36px); margin: 0 0 7px; }
+    h2 { font-size: 22px; margin: 0 0 9px; }
+    .subheading { color: #586c82; margin: 0 0 21px; line-height: 1.5; }
+    .version { display: inline-block; font-size: 13px; font-weight: 700;
+      background: #e1ebf7; color: #234b76; border-radius: 50px;
+      padding: 5px 11px; vertical-align: middle; margin-left: 5px; }
+    /*
+       Der kleine Link steht UNTER dem Rechner, nicht mehr über den Registern.
+       Dank [hidden] ist er zunächst unsichtbar. JavaScript blendet ihn nur
+       auf GitHub Pages ein; auf lokalen file://-Seiten bleibt er verborgen.
+    */
+    .download-row { display: flex; justify-content: flex-end;
+      align-items: center; margin: 12px 0 17px; }
+    .download-row[hidden] { display: none; }
+    .download-button { display: inline-flex; align-items: center; gap: 6px;
+      padding: 7px 11px; background: #145a9e;
+      border: 1px solid #104e8b; border-radius: 8px; color: #fff;
+      font: inherit; font-size: 13px; line-height: 1.3;
+      font-weight: 600; text-decoration: none; }
+    .download-button:hover { background: #0b487e; }
+    .download-button:focus-visible { outline: 3px solid #88bafb; outline-offset: 3px; }
+    .shell { background: #fff; border: 1px solid #e2eaf2; border-radius: 17px;
+      box-shadow: 0 10px 28px rgba(28, 48, 77, .07); overflow: hidden; }
+
+    /* Die drei Registerkarten. */
+    .tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0;
+      border-bottom: 1px solid #d5e0eb; background: #edf3f9; }
+    .tab { min-width: 0; border: 0; border-bottom: 4px solid transparent;
+      background: transparent; color: #425a72; cursor: pointer;
+      text-align: center; padding: 16px 8px 13px; font: inherit;
+      font-weight: 700; font-size: 16px; }
+    .tab[aria-selected="true"] { border-bottom-color: #1665b5;
+      background: #fff; color: #14518d; }
+    .tab:focus-visible { outline: 3px solid #88bafb; outline-offset: -4px; }
+    .panel { padding: 27px; }
+    .panel[hidden] { display: none; }
+    .helper { color: #5c6d82; line-height: 1.55; margin: 0 0 22px; font-size: 14px; }
+    .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px 20px; }
+    .field { margin-bottom: 18px; }
+    /* Kontrollkästchen zur optionalen Kammerberechnung in Register 1 und 2. */
+    .check-label { display: flex; align-items: center; gap: 12px;
+      cursor: pointer; margin-bottom: 0; }
+    .check-label input[type="checkbox"] { width: 23px; height: 23px;
+      padding: 0; margin: 0; flex: 0 0 auto; accent-color: #1665b5; }
+    /* Versteckte Kammerfelder dürfen trotz anderer Feldregeln nicht sichtbar sein. */
+    .chamber-field[hidden] { display: none; }
+    .result[hidden], .note[hidden] { display: none; }
+    .field.full { grid-column: 1 / -1; }
+    label { display: block; font-weight: 700; font-size: 15px; margin: 0 0 8px; }
+    select, input { width: 100%; max-width: 100%; padding: 13px 14px;
+      border: 1px solid #b7c8d9; border-radius: 10px; font: inherit;
+      font-size: 18px; background: #fff; color: #142b45; }
+    select:focus, input:focus { outline: 3px solid #bddcff; border-color: #236caf; }
+    .field-hint { display: block; font-size: 13px; color: #66768a;
+      margin-top: 7px; line-height: 1.4; }
+    .result { background: #eaf3fe; border: 1px solid #c9dff8;
+      border-radius: 13px; padding: 20px 22px; margin: 7px 0 15px; }
+    .result-label { color: #466482; font-size: 14px; font-weight: 600; }
+    .result-number { color: #145392; font-size: clamp(30px, 6vw, 43px);
+      font-weight: 800; line-height: 1.25; margin: 6px 0 5px; overflow-wrap: anywhere; }
+    .result-detail { color: #45627f; font-size: 14px; line-height: 1.5; }
+    .bar { height: 10px; border-radius: 10px; background: #cadef5;
+      overflow: hidden; margin-top: 15px; }
+    .bar-fill { height: 100%; width: 0; background: #277ad0; }
+    .alert { color: #a22e27; font-size: 14px; font-weight: 600;
+      min-height: 18px; line-height: 1.5; }
+    .meta { font-size: 14px; color: #5a6c80; line-height: 1.5; }
+    .note { font-size: 13px; color: #5a6c80; line-height: 1.6;
+      padding: 15px 17px; background: #f4f7fa; border-radius: 10px; }
+    .note strong { color: #354b65; }
+    .matches-header { display: flex; align-items: baseline;
+      justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-top: 13px; }
+    .matches-header h3 { margin: 0; font-size: 18px; }
+    .matches-header span { font-size: 13px; color: #63778c; }
+    .match-list { list-style: none; margin: 14px 0 12px; padding: 0; display: grid; gap: 9px; }
+    .match { border: 1px solid #dce5ed; border-radius: 11px;
+      padding: 13px 15px; background: #fff; }
+    .match.good { border-color: #a7d3b2; background: #f4fbf6; }
+    .match-main { display: flex; justify-content: space-between; gap: 12px;
+      align-items: baseline; flex-wrap: wrap; }
+    .match-title { font-weight: 750; font-size: 17px; }
+    .match-delta { font-size: 13px; font-weight: 700; color: #50667b; white-space: nowrap; }
+    .match.good .match-delta { color: #276942; }
+    .match-details { font-size: 13px; color: #5f7083; margin-top: 5px; line-height: 1.5; }
+    .match-action { display: inline-block; background: transparent;
+      border: 0; padding: 7px 0 0; color: #12569a;
+      font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+    .match-action:hover { text-decoration: underline; }
+    .empty { padding: 18px; border-radius: 10px; background: #f6f8fa;
+      color: #63758b; line-height: 1.5; }
+    footer { font-size: 12px; line-height: 1.6; color: #637489; margin-top: 17px; }
+    noscript p { background: #fff2dd; padding: 15px; border: 1px solid #f2c677;
+      border-radius: 10px; line-height: 1.5; }
+    @media (max-width: 560px) {
+      .panel { padding: 19px 16px; }
+      .form-grid { grid-template-columns: 1fr; gap: 0; }
+      .tab { font-size: 14px; padding: 14px 4px 12px; }
+      .result { padding: 17px; }
+    }
+  </style>
+</head>
+<body>
+<main class="app">
+  <header>
+    <h1>Tank-Peilrechner <span class="version">v0.9</span></h1>
+    <p class="subheading">Liegende Lagerbehälter nach DIN 6608 / 6616 · Dehoust-Peiltabellen (01/2015)</p>
+  </header>
+
+  <div class="shell">
+    <!-- Die Schalter oben zeigen jeweils genau eines der drei Register an. -->
+    <nav class="tabs" role="tablist" aria-label="Rechenart wählen">
+      <button class="tab" id="tab-volume" type="button" role="tab"
+              aria-selected="true" aria-controls="panel-volume" data-target="volume">Füllmenge</button>
+      <button class="tab" id="tab-height" type="button" role="tab"
+              aria-selected="false" aria-controls="panel-height" data-target="height">Füllhöhe</button>
+      <button class="tab" id="tab-identify" type="button" role="tab"
+              aria-selected="false" aria-controls="panel-identify" data-target="identify">Tankgröße</button>
+    </nav>
+
+    <!-- REGISTER 1: aus der Peilhöhe und der Tankvariante die Literzahl berechnen. -->
+    <section class="panel" id="panel-volume" role="tabpanel" aria-labelledby="tab-volume">
+      <h2>Füllmenge aus Füllhöhe</h2>
+      <p class="helper">Wähle Nenninhalt und Durchmesser des Tanks und gib die gemessene Peilhöhe ein.
+        Bei einem Mehrkammertank kannst du die Literzahl auf eine einzelne Kammer umrechnen.</p>
+      <div class="form-grid">
+        <div class="field">
+          <label for="v-capacity">Tankvolumen (Nenninhalt)</label>
+          <select id="v-capacity">
+              <option value="1000">1.000 Liter</option>
+              <option value="3000">3.000 Liter</option>
+              <option value="4000">4.000 Liter</option>
+              <option value="5000">5.000 Liter</option>
+              <option value="7000">7.000 Liter</option>
+              <option value="10000" selected>10.000 Liter</option>
+              <option value="13000">13.000 Liter</option>
+              <option value="16000">16.000 Liter</option>
+              <option value="20000">20.000 Liter</option>
+              <option value="25000">25.000 Liter</option>
+              <option value="30000">30.000 Liter</option>
+              <option value="40000">40.000 Liter</option>
+              <option value="50000">50.000 Liter</option>
+              <option value="60000">60.000 Liter</option>
+              <option value="80000">80.000 Liter</option>
+              <option value="100000">100.000 Liter</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="v-diameter">Tankdurchmesser (cm)</label>
+          <select id="v-diameter">
+              <option value="1600" selected>160 cm</option>
+              <option value="2000">200 cm</option>
+          </select>
+        </div>
+        <!-- Optionale Mehrkammertank-Berechnung: beim Anklicken erscheint die Kammergröße. -->
+        <div class="field full">
+          <label class="check-label" for="v-multi">
+            <input id="v-multi" type="checkbox">
+            <span>Mehrkammertank</span>
+          </label>
+        </div>
+        <div class="field full chamber-field" id="v-chamber-wrap" hidden>
+          <label for="v-chamber">Kammergröße (Liter)</label>
+          <input id="v-chamber" type="text" inputmode="decimal" autocomplete="off" maxlength="32"
+                 placeholder="z. B. 20.000" aria-describedby="v-chamber-hint">
+          <small class="field-hint" id="v-chamber-hint">Nenninhalt der betrachteten Kammer in Litern.</small>
+        </div>
+        <div class="field full">
+          <label for="v-height">Gepeilte Füllhöhe (cm)</label>
+          <input id="v-height" type="text" inputmode="decimal" autocomplete="off" maxlength="32"
+                 value="80" placeholder="z. B. 85,5">
+          <small class="field-hint" id="v-range">Tabellenbereich wird geladen.</small>
+        </div>
+      </div>
+      <div class="result" aria-live="polite">
+        <div class="result-label">Berechnete Füllmenge</div>
+        <div class="result-number" id="v-amount">– Liter</div>
+        <div class="result-detail" id="v-percent">–</div>
+        <div class="bar"><div class="bar-fill" id="v-bar"></div></div>
+      </div>
+      <p class="alert" id="v-error" role="status"></p>
+      <p class="meta" id="v-meta"></p>
+    </section>
+
+    <!-- REGISTER 2: Umkehrung; gesucht ist die Peilhöhe zu einer vorgegebenen Literzahl. -->
+    <section class="panel" id="panel-height" role="tabpanel" aria-labelledby="tab-height" hidden>
+      <h2>Füllhöhe aus Füllmenge</h2>
+      <p class="helper">Wähle die Tankabmessungen und gib die vorhandene Füllmenge in Litern ein.
+        Bei einem Mehrkammertank gilt die eingegebene Menge nur für die ausgewählte Kammer.</p>
+      <div class="form-grid">
+        <div class="field">
+          <label for="h-capacity">Tankvolumen (Nenninhalt)</label>
+          <select id="h-capacity">
+              <option value="1000">1.000 Liter</option>
+              <option value="3000">3.000 Liter</option>
+              <option value="4000">4.000 Liter</option>
+              <option value="5000">5.000 Liter</option>
+              <option value="7000">7.000 Liter</option>
+              <option value="10000" selected>10.000 Liter</option>
+              <option value="13000">13.000 Liter</option>
+              <option value="16000">16.000 Liter</option>
+              <option value="20000">20.000 Liter</option>
+              <option value="25000">25.000 Liter</option>
+              <option value="30000">30.000 Liter</option>
+              <option value="40000">40.000 Liter</option>
+              <option value="50000">50.000 Liter</option>
+              <option value="60000">60.000 Liter</option>
+              <option value="80000">80.000 Liter</option>
+              <option value="100000">100.000 Liter</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="h-diameter">Tankdurchmesser (cm)</label>
+          <select id="h-diameter">
+              <option value="1600" selected>160 cm</option>
+              <option value="2000">200 cm</option>
+          </select>
+        </div>
+        <!-- Optionale Mehrkammertank-Berechnung: beim Anklicken erscheint die Kammergröße. -->
+        <div class="field full">
+          <label class="check-label" for="h-multi">
+            <input id="h-multi" type="checkbox">
+            <span>Mehrkammertank</span>
+          </label>
+        </div>
+        <div class="field full chamber-field" id="h-chamber-wrap" hidden>
+          <label for="h-chamber">Kammergröße (Liter)</label>
+          <input id="h-chamber" type="text" inputmode="decimal" autocomplete="off" maxlength="32"
+                 placeholder="z. B. 20.000" aria-describedby="h-chamber-hint">
+          <small class="field-hint" id="h-chamber-hint">Nenninhalt der betrachteten Kammer in Litern.</small>
+        </div>
+        <div class="field full">
+          <label for="h-volume">Aktueller Tankinhalt (Liter)</label>
+          <input id="h-volume" type="text" inputmode="decimal" autocomplete="off" maxlength="32"
+                 value="5000" placeholder="z. B. 5.200">
+          <small class="field-hint" id="h-range">Tabellenbereich wird geladen.</small>
+        </div>
+      </div>
+      <div class="result" aria-live="polite">
+        <div class="result-label">Berechnete Peilhöhe</div>
+        <div class="result-number" id="h-result">– cm</div>
+        <div class="result-detail" id="h-percent">–</div>
+        <div class="bar"><div class="bar-fill" id="h-bar"></div></div>
+      </div>
+      <p class="alert" id="h-error" role="status"></p>
+      <p class="meta" id="h-meta"></p>
+    </section>
+
+    <!--
+      REGISTER 3: Der Durchmesser ist bekannt, gesucht ist der Nenninhalt.
+      Wir prüfen nur Tanks mit dem ausgewählten Durchmesser. Dadurch
+      müssen wir den Durchmesser NICHT mehr aus der Messung schätzen.
+    -->
+    <section class="panel" id="panel-identify" role="tabpanel" aria-labelledby="tab-identify" hidden>
+      <h2>Tankvolumen aus Mengendifferenz</h2>
+      <p class="helper" id="i-description">Wähle den <strong>bekannten Tankdurchmesser</strong> und gib zwei
+        Peilhöhen sowie die dazwischen eingefüllte oder entnommene Menge ein.
+        Der Rechner sucht ausschließlich nach passenden <strong>Tankvolumen</strong>.</p>
+      <div class="form-grid">
+        <div class="field">
+          <label for="i-height1">Peilhöhe 1 (cm)</label>
+          <input id="i-height1" type="text" inputmode="decimal" autocomplete="off" maxlength="32"
+                 value="50" placeholder="z. B. 50">
+        </div>
+        <div class="field">
+          <label for="i-height2">Peilhöhe 2 (cm)</label>
+          <input id="i-height2" type="text" inputmode="decimal" autocomplete="off" maxlength="32"
+                 value="100" placeholder="z. B. 100">
+        </div>
+        <div class="field">
+          <label for="i-diameter">Tankdurchmesser (cm)</label>
+          <!-- Statische Optionen sind auch ohne JavaScript im Dropdown sichtbar. -->
+          <select id="i-diameter">
+            <option value="1000">100 cm</option>
+            <option value="1250">125 cm</option>
+            <option value="1600" selected>160 cm</option>
+            <option value="2000">200 cm</option>
+            <option value="2500">250 cm</option>
+            <option value="2900">290 cm</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="i-delta">Mengendifferenz 1 → 2 (Liter)</label>
+          <input id="i-delta" type="text" inputmode="decimal" autocomplete="off" maxlength="32"
+                 value="4017" placeholder="z. B. 4.017">
+          <small class="field-hint">Positiver Wert – unabhängig davon, ob eingefüllt oder entnommen wurde.</small>
+        </div>
+
+        <!-- Bei aktivierter Option wird das Kammervolumen aus den beiden
+             vorhandenen Peilhöhen, der Mengendifferenz und dem Durchmesser berechnet. -->
+        <div class="field full">
+          <label class="check-label" for="i-multi">
+            <input id="i-multi" type="checkbox">
+            <span>Mehrkammertank</span>
+          </label>
+          <small class="field-hint">Die Kammergröße muss nicht bekannt sein. Zwei Peilhöhen und eine Mengendifferenz reichen für die Schätzung aus.</small>
+        </div>
+      </div>
+      <!-- Die Kammerberechnung ist unabhängig von den Dehoust-Tanklängen. -->
+      <div class="result" id="i-chamber-result" hidden aria-live="polite">
+        <div class="result-label">Geschätztes Kammervolumen</div>
+        <div class="result-number" id="i-chamber-liters">– Liter</div>
+        <div class="result-detail" id="i-chamber-details">–</div>
+      </div>
+      <p class="alert" id="i-error" role="status"></p>
+      <div class="matches-header">
+        <h3 id="i-results-heading">Mögliche Tankvolumen</h3>
+        <span id="i-count"></span>
+      </div>
+      <div id="i-matches" class="match-list" aria-live="polite" aria-relevant="additions text">
+        <p class="empty">Bitte Tankdurchmesser, zwei Peilhöhen und Mengendifferenz eingeben.</p>
+      </div>
+      <p class="note" id="i-single-note"><strong>Auswertung:</strong> Verglichen werden ausschließlich die
+        Tanks mit dem gewählten Durchmesser. Die Ergebnisse sind nach der
+        kleinsten Abweichung zwischen eingegebener und tabellierter Mengendifferenz sortiert.
+        Grün markiert sind Abweichungen von höchstens 3 % der eingegebenen Differenz.
+        Diese Suchgrenze ist keine sichere Identifikation des Tanks.</p>
+      <p class="note" id="i-chamber-note" hidden>
+        <strong>Wichtig bei Mehrkammertanks:</strong> Die Kammergröße wird aus
+        den zwei Peilhöhen und der Mengendifferenz errechnet. Grundlage ist ein
+        waagerechter Kreiszylinder mit konstantem Querschnitt und ebenen
+        Trennwänden. Das <strong>Gesamtvolumen des Tanks bleibt unbekannt</strong>:
+        Die aufgeführten Tankgrößen sind nur mögliche Varianten nach
+        Durchmesser und Mindestvolumen, keine eindeutig ermittelten Treffer.
+        Für den gesamten Tank sind weitere Angaben wie Gesamtlänge oder
+        Kammeraufteilung notwendig. Gewölbte Böden, Schräglage und Messfehler
+        können das Ergebnis beeinflussen.
+      </p>
+    </section>
+  </div>
+
+  <!--
+    OFFLINE-DOWNLOAD: Nur online unter einer GitHub-Pages-Adresse sichtbar.
+    Der Link steht UNTER den drei Rechenregistern; die Offline-Datei zeigt ihn
+    nicht an. href="" lädt die aktuell geöffnete, komplette HTML-Seite.
+    Tabellenwerte, Programmcode und Gestaltung sind darin vollständig enthalten.
+  -->
+  <div class="download-row" id="download-row" hidden>
+    <a id="download-html" class="download-button" href="" download="Tank_Peilrechner_v0.9.html"
+       aria-label="Tank-Peilrechner als eigenständige HTML-Datei für die Offline-Nutzung speichern">
+      <span aria-hidden="true">↓</span> Offline-Nutzung speichern
+    </a>
+  </div>
+
+  <p class="note"><strong>Herstellerhinweis:</strong> Die Original-Peiltabellen dienen nur zur ungefähren
+    Inhaltskontrolle, nicht zu Abrechnungs- oder Verrechnungszwecken.
+    Die Werte können laut Dehoust durch Fertigungstoleranzen, Verformungen und Schräglagen
+    erfahrungsgemäß um bis zu ±3 % abweichen. Beim Vergleich zweier Peilungen
+    kann sich die Unsicherheit der Differenz entsprechend auswirken.
+    Ganze Zentimeter stammen direkt aus der Tabelle; Zwischenwerte werden linear interpoliert.
+    Die ersten und letzten Tabelleneinträge begrenzen den verfügbaren Rechenbereich.
+    <strong>Mehrkammertank:</strong> Die Kammerwerte werden proportional zum Nenninhalt skaliert.
+    Das setzt voraus, dass die betrachtete Kammer über die Füllhöhe denselben relativen
+    Volumenverlauf besitzt wie der Gesamttank. Abweichende Stirnwand- und Kammergeometrien
+    können zusätzliche Messabweichungen verursachen; für eine genaue Inhaltsbestimmung
+    ist eine kammerbezogene Peiltabelle erforderlich.
+    In Register 3 wird eine unbekannte Kammer mit dem idealen Kreiszylinder modelliert;
+    zwei Peilhöhen und eine Mengendifferenz genügen für eine Kammergrößen-Schätzung, nicht jedoch für das Gesamtvolumen.</p>
+  <footer>v0.9 · 25 Tankvarianten · Alle Original-Tabellenwerte direkt eingebettet ·
+    Keine zusätzlichen Dateien oder Internetverbindung zur Berechnung nötig.</footer>
+
+  <noscript>
+    <p><strong>JavaScript ist nicht aktiv.</strong> Die automatische Berechnung und die Register
+      können so nicht funktionieren. Öffne die Datei in einem Browser, der lokale Skripte
+      zulässt, oder veröffentliche sie als HTTPS-Webseite und öffne den Link in Safari.
+      Die Dateien-Vorschau auf iPhone/iPad führt Skripte eventuell nicht aus.</p>
+  </noscript>
+</main>
+
+<script>
+  "use strict";
+
+  /* ================================================================
+     1. PEILTABELLEN (DIREKT IN DIESER HTML-DATEI GESPEICHERT)
+     ================================================================
+     Die Daten stammen aus den 25 Seiten der Dehoust-Peiltabellen
+     "Peiltabellen_012015_LB_DIN_6608_6616.pdf".
+
+     Jede Tankvariante hat:
+       capacity: Nenninhalt in Litern
+       diameter: Durchmesser in Millimetern
+       length:   Gesamtlänge in Millimetern
+       cylinder: Länge des zylindrischen Teils in Millimetern
+       values:  Literwerte für Peilhöhen in Zentimetern
+
+     WICHTIG: values[0] entspricht 0 cm, values[1] = 1 cm usw.
+     Beispiel: beim Tank 1.000 l / Ø 1.000 mm bedeutet values[50] = 509 l.
+     Die Daten enden an den letzten in der PDF veröffentlichten Zentimeterwerten.
+     Bei nicht tabellierten Höhen wird nicht frei extrapoliert.
+  */
+  const TANKS = [
+  // Tank 01: 1.000 l. Durchmesser 1000 mm; letzte Tabellenhöhe: 99 cm
+  {
+    capacity: 1000,
+    diameter: 1000,
+    length: 1500,
+    cylinder: 1100,
+    values: [
+      0, 2, 4, 8, 12, 17, 23, 29, 35, 42, 49, 57, 65,
+      73, 81, 90, 99, 109, 118, 128, 138, 149, 159, 170, 181, 192,
+      203, 215, 227, 238, 250, 262, 275, 287, 300, 312, 325, 338, 350,
+      363, 376, 389, 403, 416, 429, 442, 456, 469, 482, 496, 509, 522,
+      536, 549, 562, 576, 589, 602, 615, 628, 641, 654, 667, 680, 693,
+      705, 718, 730, 743, 755, 767, 779, 790, 802, 813, 824, 836, 846,
+      857, 867, 878, 888, 897, 907, 916, 925, 934, 942, 950, 958, 965,
+      972, 979, 985, 990, 996, 1000, 1004, 1007, 1010
+    ]
+  },
+  // Tank 02: 3.000 l. Durchmesser 1250 mm; letzte Tabellenhöhe: 124 cm
+  {
+    capacity: 3000,
+    diameter: 1250,
+    length: 2670,
+    cylinder: 2200,
+    values: [
+      0, 3, 10, 18, 27, 38, 49, 62, 76, 91, 106, 122, 139,
+      157, 175, 194, 213, 234, 254, 275, 297, 319, 342, 365, 388, 412,
+      436, 461, 486, 512, 537, 563, 590, 617, 644, 671, 698, 726, 754,
+      783, 811, 840, 869, 898, 928, 957, 987, 1017, 1047, 1077, 1107, 1138,
+      1168, 1199, 1229, 1260, 1291, 1322, 1353, 1384, 1415, 1446, 1477, 1508, 1539,
+      1570, 1601, 1632, 1663, 1693, 1724, 1755, 1786, 1816, 1847, 1877, 1907, 1937,
+      1967, 1997, 2026, 2056, 2085, 2114, 2143, 2172, 2200, 2228, 2256, 2284, 2311,
+      2339, 2365, 2392, 2418, 2444, 2470, 2495, 2520, 2544, 2568, 2592, 2615, 2638,
+      2660, 2682, 2703, 2724, 2745, 2764, 2783, 2802, 2820, 2837, 2854, 2869, 2884,
+      2899, 2912, 2924, 2935, 2945, 2954, 2961, 2966
+    ]
+  },
+  // Tank 03: 4.000 l. Durchmesser 1600 mm; letzte Tabellenhöhe: 159 cm
+  {
+    capacity: 4000,
+    diameter: 1600,
+    length: 2350,
+    cylinder: 1800,
+    values: [
+      0, 3, 9, 17, 25, 36, 47, 59, 72, 86, 101, 116, 133,
+      150, 167, 185, 204, 224, 244, 264, 285, 307, 329, 351, 374, 398,
+      422, 446, 471, 496, 522, 548, 574, 601, 628, 655, 683, 711, 740,
+      768, 797, 827, 856, 886, 916, 946, 977, 1008, 1039, 1070, 1102, 1134,
+      1166, 1198, 1230, 1262, 1295, 1328, 1361, 1394, 1427, 1461, 1494, 1528, 1562,
+      1596, 1630, 1664, 1698, 1732, 1767, 1801, 1836, 1870, 1905, 1939, 1974, 2009,
+      2043, 2078, 2113, 2147, 2182, 2217, 2251, 2286, 2321, 2355, 2390, 2424, 2458,
+      2493, 2527, 2561, 2595, 2629, 2663, 2696, 2730, 2764, 2797, 2830, 2863, 2896,
+      2929, 2961, 2994, 3026, 3058, 3090, 3121, 3153, 3184, 3215, 3246, 3276, 3306,
+      3336, 3366, 3395, 3424, 3453, 3482, 3510, 3538, 3565, 3592, 3619, 3646, 3672,
+      3698, 3723, 3748, 3772, 3796, 3820, 3843, 3866, 3888, 3910, 3931, 3952, 3972,
+      3992, 4011, 4030, 4047, 4065, 4081, 4097, 4112, 4126, 4140, 4153, 4164, 4175,
+      4184, 4193, 4199, 4204
+    ]
+  },
+  // Tank 04: 5.000 l. Durchmesser 1600 mm; letzte Tabellenhöhe: 159 cm
+  {
+    capacity: 5000,
+    diameter: 1600,
+    length: 2750,
+    cylinder: 2200,
+    values: [
+      0, 4, 11, 20, 31, 43, 57, 71, 87, 104, 122, 140, 160,
+      180, 201, 223, 246, 269, 293, 318, 343, 369, 395, 422, 450, 478,
+      506, 535, 565, 595, 625, 656, 688, 720, 752, 784, 817, 851, 885,
+      919, 953, 988, 1023, 1059, 1094, 1130, 1167, 1203, 1240, 1277, 1315, 1352,
+      1390, 1428, 1467, 1505, 1544, 1583, 1622, 1661, 1701, 1740, 1780, 1820, 1860,
+      1900, 1940, 1981, 2021, 2061, 2102, 2143, 2184, 2224, 2265, 2306, 2347, 2388,
+      2429, 2470, 2511, 2552, 2593, 2634, 2675, 2716, 2757, 2798, 2839, 2880, 2920,
+      2961, 3001, 3042, 3082, 3122, 3162, 3202, 3242, 3281, 3321, 3360, 3399, 3438,
+      3477, 3516, 3554, 3592, 3630, 3668, 3706, 3743, 3780, 3816, 3853, 3889, 3925,
+      3960, 3996, 4031, 4065, 4100, 4133, 4167, 4200, 4233, 4265, 4297, 4329, 4360,
+      4391, 4421, 4451, 4480, 4509, 4537, 4565, 4592, 4619, 4645, 4670, 4695, 4719,
+      4743, 4766, 4788, 4809, 4830, 4850, 4869, 4887, 4904, 4921, 4936, 4950, 4963,
+      4974, 4984, 4992, 4998
+    ]
+  },
+  // Tank 05: 7.000 l. Durchmesser 1600 mm; letzte Tabellenhöhe: 159 cm
+  {
+    capacity: 7000,
+    diameter: 1600,
+    length: 3750,
+    cylinder: 3190,
+    values: [
+      0, 6, 16, 29, 44, 61, 81, 102, 124, 148, 173, 199, 227,
+      256, 286, 317, 349, 381, 415, 450, 485, 522, 559, 597, 635, 675,
+      715, 756, 797, 839, 882, 925, 969, 1013, 1058, 1104, 1150, 1197, 1244,
+      1291, 1339, 1388, 1437, 1486, 1536, 1586, 1636, 1687, 1738, 1790, 1842, 1894,
+      1947, 2000, 2053, 2106, 2160, 2214, 2268, 2322, 2377, 2432, 2487, 2542, 2597,
+      2653, 2708, 2764, 2820, 2876, 2932, 2989, 3045, 3101, 3158, 3215, 3271, 3328,
+      3385, 3441, 3498, 3555, 3612, 3668, 3725, 3781, 3838, 3895, 3951, 4007, 4063,
+      4120, 4176, 4231, 4287, 4343, 4398, 4453, 4509, 4563, 4618, 4673, 4727, 4781,
+      4835, 4888, 4941, 4994, 5047, 5099, 5151, 5203, 5254, 5306, 5356, 5406, 5456,
+      5506, 5555, 5604, 5652, 5700, 5747, 5794, 5840, 5886, 5931, 5976, 6020, 6063,
+      6106, 6149, 6190, 6231, 6272, 6311, 6350, 6389, 6426, 6463, 6499, 6534, 6568,
+      6601, 6633, 6665, 6695, 6724, 6752, 6779, 6805, 6830, 6853, 6874, 6895, 6913,
+      6929, 6943, 6955, 6963
+    ]
+  },
+  // Tank 06: 10.000 l. Durchmesser 1600 mm; letzte Tabellenhöhe: 159 cm
+  {
+    capacity: 10000,
+    diameter: 1600,
+    length: 5350,
+    cylinder: 4785,
+    values: [
+      0, 8, 23, 42, 65, 91, 119, 150, 183, 219, 256, 295, 336,
+      378, 422, 467, 514, 562, 612, 663, 715, 768, 822, 878, 935, 992,
+      1051, 1110, 1171, 1232, 1295, 1358, 1422, 1487, 1552, 1619, 1686, 1754, 1822,
+      1891, 1961, 2032, 2103, 2174, 2247, 2319, 2393, 2467, 2541, 2616, 2691, 2767,
+      2843, 2920, 2997, 3074, 3152, 3230, 3308, 3387, 3466, 3545, 3625, 3705, 3785,
+      3865, 3946, 4027, 4108, 4189, 4270, 4351, 4433, 4515, 4596, 4678, 4760, 4842,
+      4924, 5006, 5088, 5170, 5252, 5334, 5416, 5498, 5579, 5661, 5743, 5824, 5905,
+      5987, 6068, 6148, 6229, 6309, 6390, 6470, 6549, 6629, 6708, 6787, 6865, 6944,
+      7022, 7099, 7176, 7253, 7329, 7405, 7481, 7556, 7630, 7705, 7778, 7851, 7924,
+      7996, 8067, 8138, 8208, 8277, 8346, 8414, 8482, 8548, 8614, 8679, 8744, 8807,
+      8870, 8932, 8993, 9053, 9112, 9170, 9227, 9283, 9338, 9392, 9444, 9496, 9546,
+      9595, 9642, 9688, 9733, 9776, 9818, 9857, 9895, 9932, 9966, 9998, 10027, 10055,
+      10079, 10100, 10117, 10129
+    ]
+  },
+  // Tank 07: 10.000 l. Durchmesser 2000 mm; letzte Tabellenhöhe: 198 cm
+  {
+    capacity: 10000,
+    diameter: 2000,
+    length: 3770,
+    cylinder: 3100,
+    values: [
+      0, 6, 17, 31, 48, 67, 88, 111, 136, 162, 190, 219, 250,
+      281, 314, 349, 384, 420, 458, 496, 536, 576, 617, 660, 703, 747,
+      792, 837, 884, 931, 979, 1027, 1077, 1127, 1178, 1229, 1281, 1334, 1387,
+      1441, 1496, 1551, 1607, 1663, 1720, 1777, 1835, 1893, 1952, 2012, 2071, 2132,
+      2192, 2253, 2315, 2377, 2439, 2502, 2565, 2629, 2693, 2757, 2822, 2887, 2952,
+      3018, 3083, 3150, 3216, 3283, 3350, 3417, 3485, 3552, 3620, 3689, 3757, 3826,
+      3895, 3964, 4033, 4102, 4172, 4241, 4311, 4381, 4451, 4521, 4592, 4662, 4733,
+      4803, 4874, 4945, 5015, 5086, 5157, 5228, 5299, 5370, 5441, 5512, 5583, 5654,
+      5725, 5795, 5866, 5937, 6008, 6078, 6149, 6219, 6289, 6360, 6430, 6500, 6570,
+      6639, 6709, 6778, 6848, 6917, 6986, 7054, 7123, 7191, 7259, 7327, 7394, 7462,
+      7529, 7596, 7662, 7728, 7794, 7860, 7925, 7991, 8055, 8120, 8184, 8247, 8310,
+      8373, 8436, 8498, 8560, 8621, 8682, 8742, 8802, 8862, 8921, 8979, 9037, 9094,
+      9151, 9208, 9264, 9319, 9374, 9428, 9481, 9534, 9587, 9638, 9689, 9739, 9789,
+      9838, 9886, 9934, 9980, 10026, 10071, 10115, 10159, 10201, 10243, 10284, 10323, 10362,
+      10400, 10437, 10472, 10507, 10540, 10573, 10603, 10633, 10661, 10688, 10713, 10737, 10759,
+      10779, 10796, 10812, 10824
+    ]
+  },
+  // Tank 08: 13.000 l. Durchmesser 1600 mm; letzte Tabellenhöhe: 159 cm
+  {
+    capacity: 13000,
+    diameter: 1600,
+    length: 6950,
+    cylinder: 6380,
+    values: [
+      0, 11, 31, 56, 86, 120, 158, 199, 243, 289, 339, 390, 444,
+      500, 558, 618, 680, 743, 809, 876, 944, 1014, 1086, 1159, 1234, 1310,
+      1387, 1465, 1545, 1626, 1708, 1791, 1875, 1960, 2046, 2133, 2221, 2311, 2401,
+      2491, 2583, 2675, 2769, 2863, 2958, 3053, 3149, 3246, 3344, 3442, 3540, 3640,
+      3739, 3840, 3941, 4042, 4144, 4246, 4349, 4452, 4555, 4659, 4764, 4868, 4973,
+      5078, 5184, 5289, 5395, 5501, 5608, 5714, 5821, 5928, 6034, 6142, 6249, 6356,
+      6463, 6570, 6678, 6785, 6892, 6999, 7107, 7214, 7321, 7428, 7534, 7641, 7747,
+      7853, 7960, 8065, 8171, 8276, 8381, 8486, 8590, 8694, 8798, 8901, 9004, 9107,
+      9209, 9310, 9411, 9512, 9612, 9711, 9810, 9909, 10006, 10104, 10200, 10296, 10391,
+      10485, 10579, 10672, 10764, 10855, 10945, 11035, 11123, 11211, 11298, 11383, 11468, 11552,
+      11634, 11715, 11796, 11875, 11952, 12029, 12104, 12178, 12250, 12321, 12390, 12458, 12524,
+      12589, 12651, 12712, 12771, 12828, 12883, 12935, 12986, 13034, 13079, 13121, 13160, 13196,
+      13228, 13256, 13279, 13295
+    ]
+  },
+  // Tank 09: 13.000 l. Durchmesser 2000 mm; letzte Tabellenhöhe: 198 cm
+  {
+    capacity: 13000,
+    diameter: 2000,
+    length: 4550,
+    cylinder: 3875,
+    values: [
+      0, 8, 21, 39, 60, 83, 110, 138, 168, 201, 235, 271, 309,
+      348, 389, 431, 475, 519, 566, 613, 661, 711, 762, 814, 867, 921,
+      976, 1032, 1089, 1147, 1206, 1266, 1326, 1388, 1450, 1513, 1577, 1642, 1707,
+      1773, 1840, 1907, 1976, 2044, 2114, 2184, 2255, 2326, 2398, 2471, 2544, 2617,
+      2691, 2766, 2841, 2917, 2993, 3070, 3147, 3224, 3302, 3381, 3460, 3539, 3618,
+      3698, 3779, 3859, 3940, 4022, 4103, 4185, 4268, 4350, 4433, 4516, 4599, 4683,
+      4767, 4851, 4935, 5019, 5104, 5189, 5274, 5359, 5444, 5530, 5615, 5701, 5787,
+      5873, 5959, 6045, 6131, 6217, 6303, 6389, 6476, 6562, 6648, 6735, 6821, 6907,
+      6993, 7080, 7166, 7252, 7338, 7424, 7509, 7595, 7681, 7766, 7851, 7937, 8022,
+      8107, 8191, 8276, 8360, 8444, 8528, 8612, 8695, 8778, 8861, 8944, 9026, 9108,
+      9190, 9271, 9352, 9433, 9514, 9594, 9673, 9753, 9832, 9910, 9988, 10066, 10143,
+      10220, 10296, 10372, 10447, 10522, 10596, 10670, 10743, 10816, 10888, 10960, 11031, 11101,
+      11171, 11240, 11308, 11376, 11443, 11509, 11575, 11639, 11704, 11767, 11829, 11891, 11952,
+      12012, 12071, 12129, 12187, 12243, 12298, 12353, 12406, 12458, 12510, 12560, 12609, 12657,
+      12703, 12748, 12792, 12835, 12876, 12916, 12954, 12991, 13026, 13059, 13090, 13119, 13146,
+      13171, 13193, 13212, 13227
+    ]
+  },
+  // Tank 10: 16.000 l. Durchmesser 1600 mm; letzte Tabellenhöhe: 159 cm
+  {
+    capacity: 16000,
+    diameter: 1600,
+    length: 8550,
+    cylinder: 7975,
+    values: [
+      0, 14, 38, 70, 108, 150, 197, 248, 302, 360, 421, 485, 552,
+      622, 694, 768, 845, 924, 1005, 1089, 1174, 1261, 1350, 1441, 1533, 1627,
+      1723, 1820, 1919, 2019, 2120, 2223, 2328, 2433, 2540, 2648, 2757, 2868, 2979,
+      3091, 3205, 3319, 3435, 3551, 3668, 3787, 3906, 4025, 4146, 4267, 4390, 4512,
+      4636, 4760, 4885, 5010, 5136, 5262, 5389, 5517, 5645, 5773, 5902, 6031, 6161,
+      6291, 6421, 6552, 6683, 6814, 6945, 7077, 7209, 7341, 7473, 7605, 7737, 7870,
+      8002, 8135, 8268, 8400, 8533, 8665, 8798, 8930, 9062, 9194, 9326, 9458, 9589,
+      9720, 9851, 9982, 10113, 10243, 10373, 10502, 10631, 10760, 10888, 11015, 11143, 11269,
+      11396, 11521, 11646, 11771, 11894, 12017, 12140, 12262, 12382, 12503, 12622, 12741, 12858,
+      12975, 13091, 13206, 13320, 13433, 13545, 13655, 13765, 13874, 13981, 14087, 14192, 14296,
+      14398, 14499, 14598, 14696, 14793, 14887, 14981, 15072, 15162, 15250, 15336, 15420, 15502,
+      15582, 15660, 15736, 15809, 15880, 15948, 16013, 16076, 16135, 16192, 16244, 16293, 16338,
+      16378, 16413, 16441, 16461
+    ]
+  },
+  // Tank 11: 16.000 l. Durchmesser 2000 mm; letzte Tabellenhöhe: 198 cm
+  {
+    capacity: 16000,
+    diameter: 2000,
+    length: 5520,
+    cylinder: 4850,
+    values: [
+      0, 9, 26, 48, 74, 104, 136, 171, 209, 250, 292, 337, 383,
+      432, 482, 535, 588, 644, 701, 760, 820, 881, 944, 1008, 1074, 1140,
+      1208, 1278, 1348, 1419, 1492, 1566, 1640, 1716, 1793, 1870, 1949, 2029, 2109,
+      2190, 2273, 2356, 2440, 2524, 2610, 2696, 2783, 2871, 2959, 3048, 3138, 3228,
+      3319, 3411, 3503, 3596, 3690, 3784, 3878, 3973, 4069, 4165, 4262, 4359, 4457,
+      4555, 4653, 4752, 4851, 4951, 5051, 5152, 5252, 5354, 5455, 5557, 5659, 5761,
+      5864, 5967, 6070, 6173, 6277, 6381, 6485, 6589, 6694, 6798, 6903, 7008, 7113,
+      7218, 7323, 7428, 7534, 7639, 7745, 7850, 7956, 8062, 8167, 8273, 8378, 8484,
+      8590, 8695, 8801, 8906, 9011, 9116, 9221, 9326, 9431, 9536, 9640, 9744, 9848,
+      9952, 10056, 10160, 10263, 10366, 10468, 10571, 10673, 10775, 10877, 10978, 11079, 11179,
+      11279, 11379, 11479, 11578, 11676, 11774, 11872, 11969, 12066, 12163, 12258, 12354, 12448,
+      12543, 12636, 12729, 12822, 12914, 13005, 13096, 13186, 13275, 13364, 13451, 13539, 13625,
+      13711, 13796, 13880, 13963, 14046, 14127, 14208, 14288, 14367, 14445, 14522, 14598, 14673,
+      14747, 14820, 14892, 14962, 15032, 15100, 15167, 15233, 15298, 15361, 15423, 15484, 15543,
+      15601, 15657, 15711, 15764, 15815, 15864, 15912, 15957, 16000, 16041, 16080, 16116, 16150,
+      16181, 16208, 16231, 16250
+    ]
+  },
+  // Tank 12: 20.000 l. Durchmesser 2000 mm; letzte Tabellenhöhe: 198 cm
+  {
+    capacity: 20000,
+    diameter: 2000,
+    length: 6870,
+    cylinder: 6200,
+    values: [
+      0, 12, 33, 61, 94, 132, 173, 218, 266, 317, 371, 427, 486,
+      548, 612, 678, 746, 816, 889, 963, 1039, 1116, 1196, 1277, 1360, 1444,
+      1530, 1617, 1706, 1796, 1888, 1981, 2075, 2170, 2267, 2365, 2464, 2564, 2666,
+      2768, 2872, 2976, 3082, 3189, 3296, 3405, 3514, 3624, 3736, 3848, 3961, 4074,
+      4189, 4304, 4420, 4537, 4654, 4772, 4891, 5011, 5131, 5252, 5373, 5495, 5617,
+      5741, 5864, 5988, 6113, 6238, 6364, 6490, 6616, 6743, 6870, 6998, 7126, 7254,
+      7383, 7512, 7642, 7771, 7901, 8031, 8162, 8292, 8423, 8554, 8686, 8817, 8949,
+      9081, 9212, 9344, 9477, 9609, 9741, 9873, 10006, 10138, 10270, 10403, 10535, 10668,
+      10800, 10932, 11064, 11196, 11328, 11460, 11592, 11723, 11854, 11986, 12117, 12247, 12378,
+      12508, 12638, 12768, 12897, 13027, 13155, 13284, 13412, 13540, 13667, 13794, 13921, 14047,
+      14173, 14298, 14423, 14547, 14671, 14794, 14917, 15039, 15160, 15281, 15402, 15521, 15640,
+      15759, 15877, 15994, 16110, 16225, 16340, 16454, 16567, 16680, 16791, 16902, 17011, 17120,
+      17228, 17335, 17441, 17546, 17650, 17752, 17854, 17955, 18054, 18153, 18250, 18346, 18440,
+      18534, 18626, 18716, 18806, 18894, 18980, 19065, 19148, 19230, 19310, 19388, 19465, 19540,
+      19613, 19683, 19752, 19819, 19884, 19946, 20006, 20064, 20119, 20171, 20220, 20266, 20309,
+      20348, 20383, 20413, 20437
+    ]
+  },
+  // Tank 13: 20.000 l. Durchmesser 2500 mm; letzte Tabellenhöhe: 248 cm
+  {
+    capacity: 20000,
+    diameter: 2500,
+    length: 4570,
+    cylinder: 3740,
+    values: [
+      0, 8, 23, 42, 65, 91, 119, 150, 184, 219, 257, 296, 338,
+      380, 425, 471, 519, 569, 619, 671, 725, 780, 836, 893, 952, 1012,
+      1073, 1135, 1198, 1262, 1328, 1394, 1461, 1530, 1599, 1669, 1741, 1813, 1886,
+      1960, 2035, 2110, 2187, 2264, 2342, 2421, 2501, 2581, 2663, 2745, 2827, 2911,
+      2995, 3079, 3165, 3251, 3337, 3425, 3513, 3601, 3690, 3780, 3871, 3961, 4053,
+      4145, 4237, 4330, 4424, 4518, 4612, 4707, 4803, 4899, 4995, 5092, 5189, 5287,
+      5385, 5484, 5583, 5682, 5782, 5882, 5982, 6083, 6184, 6285, 6387, 6489, 6591,
+      6694, 6797, 6900, 7003, 7107, 7211, 7315, 7420, 7524, 7629, 7734, 7839, 7945,
+      8051, 8156, 8262, 8368, 8475, 8581, 8688, 8794, 8901, 9008, 9115, 9222, 9329,
+      9436, 9544, 9651, 9758, 9866, 9973, 10081, 10188, 10296, 10403, 10511, 10618, 10726,
+      10833, 10940, 11048, 11155, 11262, 11369, 11476, 11583, 11690, 11796, 11903, 12009, 12116,
+      12222, 12328, 12434, 12539, 12645, 12750, 12855, 12960, 13065, 13169, 13273, 13377, 13481,
+      13584, 13688, 13791, 13893, 13996, 14098, 14199, 14301, 14402, 14503, 14603, 14703, 14803,
+      14902, 15001, 15100, 15198, 15296, 15393, 15490, 15586, 15682, 15778, 15873, 15968, 16062,
+      16155, 16248, 16341, 16433, 16525, 16616, 16706, 16796, 16885, 16974, 17062, 17149, 17236,
+      17322, 17408, 17492, 17577, 17660, 17743, 17825, 17906, 17987, 18067, 18146, 18224, 18301,
+      18378, 18454, 18529, 18603, 18676, 18748, 18820, 18890, 18960, 19028, 19096, 19163, 19228,
+      19293, 19356, 19418, 19479, 19540, 19598, 19656, 19712, 19768, 19821, 19874, 19925, 19975,
+      20023, 20069, 20114, 20158, 20199, 20239, 20277, 20313, 20347, 20379, 20408, 20435, 20458,
+      20478, 20494
+    ]
+  },
+  // Tank 14: 25.000 l. Durchmesser 2000 mm; letzte Tabellenhöhe: 198 cm
+  {
+    capacity: 25000,
+    diameter: 2000,
+    length: 8420,
+    cylinder: 7750,
+    values: [
+      0, 15, 42, 76, 117, 164, 215, 271, 331, 394, 461, 531, 605,
+      681, 761, 843, 927, 1014, 1104, 1196, 1290, 1387, 1485, 1586, 1688, 1793,
+      1899, 2007, 2117, 2229, 2342, 2457, 2574, 2692, 2812, 2933, 3056, 3180, 3305,
+      3432, 3560, 3689, 3820, 3951, 4084, 4218, 4354, 4490, 4627, 4766, 4905, 5046,
+      5187, 5329, 5472, 5617, 5762, 5907, 6054, 6202, 6350, 6499, 6649, 6799, 6950,
+      7102, 7255, 7408, 7561, 7716, 7870, 8026, 8182, 8338, 8495, 8653, 8810, 8969,
+      9127, 9286, 9446, 9606, 9766, 9926, 10087, 10248, 10409, 10571, 10733, 10895, 11057,
+      11219, 11382, 11544, 11707, 11870, 12033, 12196, 12359, 12522, 12685, 12848, 13011, 13175,
+      13338, 13500, 13663, 13826, 13988, 14151, 14313, 14475, 14637, 14799, 14960, 15121, 15282,
+      15443, 15603, 15763, 15922, 16081, 16240, 16399, 16557, 16714, 16871, 17028, 17184, 17340,
+      17495, 17649, 17803, 17956, 18109, 18261, 18412, 18563, 18713, 18862, 19011, 19159, 19305,
+      19452, 19597, 19741, 19885, 20028, 20169, 20310, 20450, 20589, 20726, 20863, 20999, 21133,
+      21266, 21398, 21529, 21659, 21788, 21915, 22041, 22165, 22288, 22410, 22530, 22649, 22766,
+      22882, 22996, 23108, 23218, 23327, 23434, 23540, 23643, 23744, 23843, 23941, 24036, 24128,
+      24219, 24307, 24392, 24475, 24556, 24633, 24708, 24779, 24848, 24913, 24974, 25031, 25084,
+      25133, 25176, 25213, 25243
+    ]
+  },
+  // Tank 15: 25.000 l. Durchmesser 2500 mm; letzte Tabellenhöhe: 248 cm
+  {
+    capacity: 25000,
+    diameter: 2500,
+    length: 5580,
+    cylinder: 4750,
+    values: [
+      0, 11, 29, 53, 82, 114, 150, 189, 231, 276, 323, 372, 424,
+      478, 534, 592, 652, 714, 777, 843, 910, 978, 1048, 1120, 1193, 1268,
+      1344, 1422, 1500, 1581, 1662, 1745, 1829, 1914, 2001, 2088, 2177, 2267, 2358,
+      2450, 2543, 2637, 2732, 2829, 2926, 3024, 3123, 3223, 3324, 3425, 3528, 3631,
+      3736, 3841, 3947, 4054, 4161, 4269, 4378, 4488, 4599, 4710, 4822, 4934, 5048,
+      5162, 5276, 5391, 5507, 5624, 5741, 5858, 5976, 6095, 6214, 6334, 6454, 6575,
+      6696, 6818, 6940, 7063, 7186, 7310, 7434, 7558, 7683, 7808, 7934, 8060, 8186,
+      8313, 8440, 8567, 8695, 8823, 8951, 9080, 9209, 9338, 9467, 9597, 9727, 9857,
+      9987, 10118, 10248, 10379, 10510, 10641, 10773, 10904, 11036, 11168, 11300, 11432, 11564,
+      11696, 11828, 11961, 12093, 12226, 12358, 12491, 12623, 12756, 12888, 13021, 13153, 13286,
+      13418, 13551, 13683, 13815, 13947, 14079, 14211, 14343, 14475, 14606, 14738, 14869, 15000,
+      15131, 15262, 15392, 15522, 15653, 15782, 15912, 16042, 16171, 16300, 16428, 16557, 16685,
+      16812, 16940, 17067, 17194, 17320, 17446, 17572, 17697, 17822, 17946, 18070, 18194, 18317,
+      18440, 18562, 18684, 18806, 18926, 19047, 19167, 19286, 19405, 19523, 19641, 19758, 19874,
+      19990, 20105, 20220, 20334, 20447, 20560, 20672, 20783, 20894, 21004, 21113, 21222, 21329,
+      21436, 21542, 21648, 21752, 21856, 21958, 22060, 22161, 22261, 22361, 22459, 22556, 22653,
+      22748, 22842, 22936, 23028, 23119, 23209, 23298, 23386, 23473, 23558, 23642, 23726, 23807,
+      23888, 23967, 24045, 24121, 24196, 24270, 24342, 24412, 24481, 24549, 24614, 24678, 24741,
+      24801, 24859, 24916, 24970, 25023, 25073, 25121, 25166, 25208, 25248, 25285, 25318, 25348,
+      25373, 25394
+    ]
+  },
+  // Tank 16: 30.000 l. Durchmesser 2000 mm; letzte Tabellenhöhe: 198 cm
+  {
+    capacity: 30000,
+    diameter: 2000,
+    length: 9970,
+    cylinder: 9300,
+    values: [
+      0, 18, 50, 91, 140, 196, 257, 324, 395, 471, 551, 635, 723,
+      815, 909, 1007, 1108, 1213, 1319, 1429, 1542, 1657, 1774, 1894, 2017, 2141,
+      2268, 2397, 2528, 2662, 2797, 2934, 3073, 3214, 3357, 3501, 3647, 3795, 3944,
+      4095, 4248, 4402, 4557, 4714, 4872, 5032, 5193, 5355, 5519, 5684, 5850, 6017,
+      6185, 6354, 6525, 6696, 6869, 7043, 7217, 7393, 7569, 7746, 7924, 8103, 8283,
+      8464, 8645, 8827, 9010, 9193, 9377, 9562, 9747, 9933, 10120, 10307, 10495, 10683,
+      10872, 11061, 11250, 11440, 11631, 11821, 12012, 12204, 12395, 12587, 12780, 12972, 13165,
+      13358, 13551, 13744, 13938, 14131, 14325, 14519, 14712, 14906, 15100, 15294, 15488, 15681,
+      15875, 16069, 16262, 16456, 16649, 16842, 17035, 17227, 17420, 17612, 17803, 17995, 18186,
+      18377, 18567, 18758, 18947, 19136, 19325, 19514, 19701, 19889, 20075, 20262, 20447, 20632,
+      20817, 21000, 21183, 21366, 21547, 21728, 21908, 22087, 22266, 22443, 22620, 22796, 22970,
+      23144, 23317, 23489, 23660, 23830, 23998, 24166, 24332, 24498, 24662, 24824, 24986, 25146,
+      25305, 25462, 25618, 25773, 25926, 26077, 26227, 26375, 26522, 26667, 26810, 26952, 27092,
+      27229, 27365, 27499, 27631, 27761, 27889, 28014, 28137, 28258, 28377, 28493, 28606, 28717,
+      28825, 28930, 29032, 29132, 29228, 29320, 29409, 29495, 29577, 29654, 29727, 29796, 29859,
+      29917, 29969, 30013, 30050
+    ]
+  },
+  // Tank 17: 30.000 l. Durchmesser 2500 mm; letzte Tabellenhöhe: 248 cm
+  {
+    capacity: 30000,
+    diameter: 2500,
+    length: 6740,
+    cylinder: 5910,
+    values: [
+      0, 13, 36, 66, 101, 141, 186, 234, 286, 341, 399, 460, 524,
+      590, 659, 731, 804, 880, 959, 1039, 1121, 1206, 1292, 1380, 1470, 1562,
+      1656, 1751, 1848, 1946, 2047, 2148, 2251, 2356, 2462, 2569, 2678, 2788, 2900,
+      3013, 3127, 3242, 3359, 3477, 3596, 3716, 3837, 3959, 4083, 4207, 4333, 4459,
+      4587, 4716, 4845, 4976, 5107, 5240, 5373, 5507, 5642, 5778, 5915, 6052, 6190,
+      6330, 6469, 6610, 6751, 6893, 7036, 7180, 7324, 7469, 7614, 7760, 7907, 8054,
+      8202, 8351, 8500, 8649, 8799, 8950, 9101, 9253, 9405, 9558, 9711, 9864, 10018,
+      10172, 10327, 10482, 10638, 10794, 10950, 11107, 11263, 11421, 11578, 11736, 11894, 12053,
+      12211, 12370, 12529, 12689, 12848, 13008, 13168, 13328, 13488, 13649, 13809, 13970, 14131,
+      14292, 14453, 14614, 14775, 14936, 15097, 15258, 15420, 15581, 15742, 15904, 16065, 16226,
+      16387, 16548, 16709, 16870, 17031, 17192, 17352, 17513, 17673, 17833, 17993, 18153, 18312,
+      18472, 18631, 18790, 18949, 19107, 19265, 19423, 19581, 19738, 19895, 20052, 20208, 20364,
+      20519, 20675, 20830, 20984, 21138, 21292, 21445, 21597, 21750, 21901, 22053, 22203, 22354,
+      22503, 22652, 22801, 22949, 23096, 23243, 23389, 23535, 23680, 23824, 23968, 24111, 24253,
+      24394, 24535, 24675, 24814, 24953, 25090, 25227, 25363, 25499, 25633, 25766, 25899, 26030,
+      26161, 26291, 26420, 26548, 26674, 26800, 26925, 27049, 27171, 27293, 27413, 27532, 27650,
+      27767, 27883, 27997, 28110, 28222, 28332, 28442, 28549, 28656, 28761, 28864, 28966, 29067,
+      29165, 29263, 29358, 29452, 29545, 29635, 29724, 29810, 29895, 29978, 30059, 30138, 30215,
+      30289, 30361, 30431, 30498, 30562, 30624, 30683, 30739, 30791, 30841, 30886, 30927, 30964,
+      30996, 31021
+    ]
+  },
+  // Tank 18: 40.000 l. Durchmesser 2500 mm; letzte Tabellenhöhe: 248 cm
+  {
+    capacity: 40000,
+    diameter: 2500,
+    length: 8700,
+    cylinder: 7880,
+    values: [
+      0, 17, 48, 87, 134, 187, 246, 310, 378, 451, 528, 608, 693,
+      780, 871, 966, 1063, 1163, 1267, 1373, 1481, 1592, 1706, 1822, 1941, 2062,
+      2185, 2310, 2438, 2568, 2699, 2833, 2968, 3106, 3245, 3386, 3529, 3674, 3821,
+      3969, 4119, 4270, 4423, 4577, 4733, 4891, 5050, 5210, 5372, 5535, 5700, 5866,
+      6033, 6201, 6371, 6542, 6714, 6887, 7062, 7237, 7414, 7591, 7770, 7950, 8131,
+      8313, 8496, 8680, 8864, 9050, 9237, 9424, 9612, 9801, 9991, 10182, 10374, 10566,
+      10759, 10953, 11148, 11343, 11539, 11736, 11933, 12131, 12329, 12528, 12728, 12928, 13129,
+      13330, 13532, 13734, 13937, 14141, 14344, 14548, 14753, 14958, 15163, 15369, 15575, 15782,
+      15989, 16196, 16403, 16611, 16819, 17027, 17235, 17444, 17653, 17862, 18071, 18280, 18490,
+      18699, 18909, 19119, 19329, 19539, 19749, 19959, 20169, 20379, 20589, 20799, 21010, 21220,
+      21430, 21639, 21849, 22059, 22268, 22478, 22687, 22896, 23105, 23314, 23522, 23730, 23938,
+      24146, 24353, 24560, 24767, 24974, 25180, 25386, 25591, 25796, 26001, 26205, 26409, 26612,
+      26815, 27018, 27220, 27421, 27622, 27822, 28022, 28221, 28420, 28618, 28815, 29012, 29208,
+      29404, 29598, 29792, 29986, 30178, 30370, 30561, 30751, 30940, 31129, 31316, 31503, 31689,
+      31874, 32058, 32241, 32423, 32604, 32784, 32963, 33141, 33318, 33494, 33669, 33842, 34015,
+      34186, 34356, 34524, 34692, 34858, 35023, 35186, 35348, 35509, 35668, 35826, 35983, 36137,
+      36291, 36443, 36593, 36741, 36888, 37033, 37177, 37318, 37458, 37596, 37732, 37866, 37998,
+      38128, 38256, 38382, 38506, 38627, 38747, 38863, 38978, 39090, 39199, 39306, 39410, 39511,
+      39609, 39704, 39796, 39885, 39970, 40052, 40130, 40203, 40273, 40338, 40398, 40453, 40502,
+      40543, 40577
+    ]
+  },
+  // Tank 19: 40.000 l. Durchmesser 2900 mm; letzte Tabellenhöhe: 288 cm
+  {
+    capacity: 40000,
+    diameter: 2900,
+    length: 6650,
+    cylinder: 5700,
+    values: [
+      0, 14, 38, 69, 106, 148, 194, 245, 299, 356, 417, 481, 548,
+      618, 690, 765, 843, 922, 1005, 1089, 1176, 1264, 1355, 1448, 1543, 1640,
+      1738, 1839, 1941, 2045, 2150, 2258, 2367, 2477, 2589, 2703, 2818, 2935, 3053,
+      3173, 3294, 3416, 3540, 3665, 3791, 3919, 4048, 4178, 4309, 4442, 4576, 4711,
+      4847, 4984, 5122, 5262, 5402, 5544, 5686, 5830, 5974, 6120, 6266, 6414, 6562,
+      6712, 6862, 7013, 7165, 7318, 7472, 7627, 7782, 7938, 8096, 8253, 8412, 8571,
+      8732, 8892, 9054, 9216, 9379, 9543, 9707, 9872, 10038, 10204, 10371, 10538, 10706,
+      10875, 11044, 11214, 11384, 11555, 11727, 11898, 12071, 12244, 12417, 12591, 12765, 12940,
+      13115, 13291, 13467, 13643, 13820, 13997, 14174, 14352, 14530, 14709, 14888, 15067, 15247,
+      15426, 15606, 15787, 15967, 16148, 16329, 16511, 16692, 16874, 17056, 17238, 17420, 17603,
+      17786, 17968, 18151, 18334, 18518, 18701, 18884, 19068, 19251, 19435, 19619, 19802, 19986,
+      20170, 20354, 20538, 20721, 20905, 21089, 21273, 21457, 21640, 21824, 22007, 22191, 22374,
+      22557, 22740, 22923, 23106, 23288, 23471, 23653, 23835, 24017, 24199, 24381, 24562, 24743,
+      24924, 25104, 25285, 25465, 25645, 25824, 26003, 26182, 26361, 26539, 26717, 26894, 27071,
+      27248, 27424, 27600, 27776, 27951, 28126, 28300, 28474, 28647, 28820, 28992, 29164, 29335,
+      29506, 29676, 29846, 30015, 30184, 30352, 30519, 30686, 30852, 31018, 31183, 31347, 31511,
+      31673, 31836, 31997, 32158, 32318, 32477, 32636, 32794, 32951, 33107, 33262, 33417, 33571,
+      33724, 33876, 34027, 34177, 34326, 34475, 34622, 34769, 34914, 35059, 35202, 35345, 35486,
+      35627, 35766, 35905, 36042, 36178, 36313, 36446, 36579, 36710, 36840, 36969, 37097, 37223,
+      37348, 37472, 37594, 37715, 37835, 37953, 38069, 38185, 38298, 38410, 38521, 38630, 38737,
+      38843, 38947, 39049, 39150, 39248, 39345, 39440, 39533, 39623, 39712, 39799, 39883, 39966,
+      40046, 40123, 40198, 40271, 40341, 40408, 40472, 40533, 40591, 40645, 40695, 40742, 40784,
+      40822, 40853, 40878
+    ]
+  },
+  // Tank 20: 50.000 l. Durchmesser 2500 mm; letzte Tabellenhöhe: 248 cm
+  {
+    capacity: 50000,
+    diameter: 2500,
+    length: 10680,
+    cylinder: 9850,
+    values: [
+      0, 21, 59, 109, 167, 233, 306, 385, 470, 561, 656, 757, 861,
+      971, 1084, 1201, 1322, 1447, 1575, 1706, 1841, 1979, 2120, 2265, 2412, 2562,
+      2714, 2870, 3028, 3189, 3352, 3517, 3685, 3856, 4029, 4203, 4381, 4560, 4741,
+      4925, 5110, 5297, 5487, 5678, 5871, 6066, 6263, 6461, 6661, 6863, 7067, 7272,
+      7479, 7687, 7897, 8108, 8321, 8535, 8750, 8967, 9185, 9405, 9626, 9848, 10072,
+      10296, 10522, 10749, 10977, 11206, 11437, 11668, 11901, 12134, 12369, 12604, 12841, 13078,
+      13317, 13556, 13796, 14037, 14279, 14521, 14764, 15009, 15253, 15499, 15745, 15992, 16240,
+      16488, 16737, 16987, 17237, 17487, 17739, 17990, 18243, 18495, 18749, 19002, 19256, 19511,
+      19766, 20021, 20277, 20533, 20789, 21046, 21302, 21560, 21817, 22075, 22332, 22590, 22849,
+      23107, 23366, 23624, 23883, 24142, 24401, 24660, 24918, 25177, 25436, 25695, 25954, 26213,
+      26472, 26730, 26989, 27247, 27506, 27764, 28022, 28279, 28537, 28794, 29051, 29307, 29564,
+      29820, 30076, 30331, 30586, 30841, 31095, 31348, 31602, 31855, 32107, 32359, 32610, 32861,
+      33111, 33361, 33610, 33858, 34106, 34353, 34600, 34845, 35090, 35335, 35578, 35821, 36063,
+      36304, 36544, 36784, 37022, 37260, 37497, 37732, 37967, 38201, 38433, 38665, 38896, 39125,
+      39354, 39581, 39807, 40032, 40256, 40478, 40699, 40919, 41138, 41355, 41571, 41786, 41999,
+      42210, 42420, 42629, 42836, 43041, 43245, 43448, 43648, 43847, 44044, 44239, 44433, 44625,
+      44815, 45002, 45188, 45372, 45554, 45734, 45912, 46087, 46260, 46431, 46600, 46766, 46930,
+      47091, 47250, 47406, 47560, 47710, 47858, 48003, 48145, 48284, 48420, 48552, 48681, 48807,
+      48929, 49047, 49161, 49272, 49378, 49479, 49576, 49668, 49755, 49836, 49910, 49979, 50039,
+      50091, 50133
+    ]
+  },
+  // Tank 21: 50.000 l. Durchmesser 2900 mm; letzte Tabellenhöhe: 288 cm
+  {
+    capacity: 50000,
+    diameter: 2900,
+    length: 8150,
+    cylinder: 7200,
+    values: [
+      0, 17, 47, 86, 133, 185, 244, 307, 375, 447, 523, 603, 687,
+      774, 864, 958, 1055, 1155, 1258, 1363, 1472, 1582, 1696, 1812, 1930, 2051,
+      2174, 2299, 2427, 2556, 2688, 2822, 2958, 3095, 3235, 3377, 3520, 3666, 3813,
+      3962, 4112, 4264, 4418, 4574, 4731, 4890, 5050, 5212, 5375, 5540, 5706, 5874,
+      6043, 6213, 6385, 6558, 6733, 6909, 7086, 7264, 7443, 7624, 7806, 7989, 8173,
+      8358, 8544, 8732, 8920, 9110, 9301, 9492, 9685, 9879, 10073, 10269, 10465, 10663,
+      10861, 11060, 11260, 11461, 11663, 11865, 12069, 12273, 12478, 12684, 12890, 13097, 13305,
+      13514, 13723, 13933, 14144, 14355, 14567, 14779, 14993, 15206, 15421, 15635, 15851, 16067,
+      16283, 16500, 16718, 16936, 17154, 17373, 17592, 17812, 18032, 18253, 18474, 18695, 18917,
+      19139, 19361, 19584, 19807, 20030, 20254, 20478, 20702, 20927, 21151, 21376, 21601, 21827,
+      22052, 22278, 22504, 22730, 22956, 23182, 23409, 23635, 23862, 24088, 24315, 24542, 24769,
+      24996, 25223, 25450, 25677, 25903, 26130, 26357, 26584, 26811, 27037, 27264, 27490, 27716,
+      27943, 28169, 28394, 28620, 28846, 29071, 29296, 29521, 29746, 29970, 30194, 30418, 30642,
+      30865, 31088, 31311, 31533, 31755, 31977, 32198, 32419, 32640, 32860, 33080, 33299, 33518,
+      33736, 33954, 34172, 34389, 34605, 34821, 35036, 35251, 35465, 35679, 35892, 36105, 36317,
+      36528, 36738, 36948, 37158, 37366, 37574, 37781, 37988, 38193, 38398, 38602, 38806, 39008,
+      39210, 39411, 39611, 39810, 40008, 40206, 40402, 40598, 40792, 40986, 41178, 41370, 41561,
+      41750, 41939, 42126, 42312, 42498, 42682, 42865, 43047, 43227, 43407, 43585, 43762, 43937,
+      44112, 44285, 44457, 44627, 44796, 44964, 45130, 45295, 45458, 45620, 45780, 45939, 46096,
+      46252, 46406, 46558, 46708, 46857, 47004, 47150, 47293, 47435, 47575, 47712, 47848, 47982,
+      48114, 48244, 48371, 48497, 48620, 48740, 48859, 48975, 49088, 49199, 49308, 49413, 49516,
+      49616, 49713, 49807, 49898, 49985, 50069, 50150, 50226, 50298, 50367, 50430, 50489, 50542,
+      50588, 50628, 50659
+    ]
+  },
+  // Tank 22: 60.000 l. Durchmesser 2500 mm; letzte Tabellenhöhe: 248 cm
+  {
+    capacity: 60000,
+    diameter: 2500,
+    length: 12650,
+    cylinder: 11820,
+    values: [
+      0, 25, 71, 130, 200, 279, 366, 461, 563, 671, 785, 905, 1030,
+      1161, 1296, 1436, 1581, 1730, 1883, 2040, 2201, 2366, 2534, 2707, 2882, 3061,
+      3244, 3429, 3618, 3810, 4004, 4202, 4403, 4606, 4812, 5020, 5232, 5446, 5662,
+      5881, 6102, 6325, 6551, 6779, 7009, 7241, 7476, 7712, 7951, 8191, 8434, 8678,
+      8924, 9172, 9422, 9674, 9927, 10182, 10439, 10697, 10957, 11219, 11482, 11746, 12012,
+      12280, 12548, 12819, 13090, 13363, 13637, 13913, 14189, 14467, 14746, 15026, 15308, 15590,
+      15874, 16158, 16444, 16731, 17018, 17307, 17596, 17886, 18178, 18470, 18763, 19056, 19351,
+      19646, 19942, 20239, 20536, 20834, 21133, 21432, 21732, 22033, 22334, 22635, 22937, 23240,
+      23543, 23847, 24150, 24455, 24759, 25064, 25370, 25675, 25981, 26288, 26594, 26901, 27208,
+      27515, 27822, 28129, 28437, 28745, 29052, 29360, 29668, 29976, 30283, 30591, 30899, 31207,
+      31514, 31822, 32129, 32436, 32743, 33050, 33356, 33662, 33969, 34274, 34580, 34885, 35190,
+      35494, 35798, 36101, 36405, 36707, 37009, 37311, 37612, 37913, 38213, 38512, 38811, 39109,
+      39407, 39704, 40000, 40295, 40590, 40884, 41177, 41469, 41761, 42051, 42341, 42630, 42918,
+      43204, 43490, 43775, 44059, 44342, 44623, 44904, 45183, 45461, 45738, 46014, 46288, 46562,
+      46833, 47104, 47373, 47641, 47907, 48172, 48435, 48697, 48958, 49216, 49473, 49729, 49983,
+      50235, 50485, 50733, 50980, 51225, 51468, 51709, 51948, 52185, 52420, 52653, 52883, 53112,
+      53338, 53562, 53784, 54003, 54220, 54435, 54647, 54856, 55063, 55267, 55468, 55666, 55862,
+      56054, 56244, 56430, 56613, 56793, 56970, 57143, 57313, 57478, 57641, 57799, 57953, 58103,
+      58249, 58390, 58527, 58659, 58785, 58907, 59023, 59133, 59236, 59333, 59423, 59504, 59577,
+      59639, 59689
+    ]
+  },
+  // Tank 23: 60.000 l. Durchmesser 2900 mm; letzte Tabellenhöhe: 288 cm
+  {
+    capacity: 60000,
+    diameter: 2900,
+    length: 9585,
+    cylinder: 8645,
+    values: [
+      0, 20, 57, 103, 159, 222, 291, 367, 448, 534, 625, 720, 820,
+      924, 1033, 1144, 1260, 1379, 1502, 1628, 1757, 1889, 2024, 2162, 2303, 2447,
+      2594, 2743, 2895, 3049, 3206, 3365, 3527, 3691, 3857, 4026, 4197, 4370, 4545,
+      4722, 4901, 5082, 5265, 5450, 5637, 5825, 6016, 6208, 6402, 6598, 6796, 6995,
+      7196, 7398, 7602, 7808, 8015, 8223, 8434, 8645, 8858, 9073, 9288, 9506, 9724,
+      9944, 10165, 10388, 10611, 10836, 11062, 11289, 11518, 11748, 11978, 12210, 12443, 12677,
+      12912, 13148, 13386, 13624, 13863, 14103, 14344, 14586, 14829, 15072, 15317, 15562, 15809,
+      16056, 16304, 16552, 16802, 17052, 17303, 17555, 17807, 18060, 18314, 18568, 18823, 19079,
+      19335, 19592, 19850, 20108, 20366, 20625, 20885, 21145, 21406, 21667, 21928, 22190, 22453,
+      22715, 22979, 23242, 23506, 23770, 24035, 24300, 24565, 24831, 25097, 25363, 25629, 25896,
+      26162, 26429, 26697, 26964, 27231, 27499, 27767, 28035, 28303, 28571, 28840, 29108, 29376,
+      29645, 29913, 30182, 30450, 30718, 30987, 31255, 31523, 31791, 32060, 32328, 32595, 32863,
+      33131, 33398, 33665, 33932, 34199, 34466, 34732, 34998, 35264, 35529, 35795, 36060, 36324,
+      36588, 36852, 37116, 37379, 37642, 37904, 38166, 38428, 38689, 38949, 39209, 39469, 39728,
+      39987, 40245, 40502, 40759, 41015, 41271, 41526, 41780, 42034, 42287, 42539, 42791, 43042,
+      43292, 43542, 43790, 44038, 44285, 44531, 44777, 45021, 45265, 45508, 45750, 45991, 46231,
+      46470, 46708, 46945, 47181, 47416, 47650, 47883, 48115, 48346, 48576, 48804, 49031, 49257,
+      49482, 49706, 49928, 50149, 50369, 50588, 50805, 51021, 51235, 51448, 51660, 51870, 52078,
+      52286, 52491, 52695, 52898, 53099, 53298, 53495, 53691, 53885, 54078, 54268, 54457, 54644,
+      54829, 55012, 55193, 55372, 55549, 55724, 55897, 56068, 56236, 56403, 56567, 56729, 56888,
+      57045, 57200, 57351, 57501, 57647, 57791, 57933, 58071, 58206, 58339, 58468, 58594, 58717,
+      58836, 58952, 59064, 59172, 59276, 59377, 59473, 59564, 59650, 59732, 59808, 59878, 59941,
+      59997, 60045, 60082
+    ]
+  },
+  // Tank 24: 80.000 l. Durchmesser 2900 mm; letzte Tabellenhöhe: 288 cm
+  {
+    capacity: 80000,
+    diameter: 2900,
+    length: 12750,
+    cylinder: 11820,
+    values: [
+      0, 28, 77, 140, 216, 301, 396, 498, 608, 725, 849, 978, 1114,
+      1255, 1402, 1553, 1710, 1872, 2038, 2208, 2383, 2562, 2745, 2932, 3123, 3318,
+      3516, 3718, 3923, 4132, 4344, 4559, 4778, 5000, 5224, 5452, 5683, 5916, 6152,
+      6391, 6633, 6878, 7125, 7374, 7626, 7881, 8138, 8397, 8659, 8923, 9189, 9458,
+      9728, 10001, 10276, 10553, 10832, 11113, 11396, 11681, 11967, 12256, 12546, 12839, 13133,
+      13429, 13726, 14025, 14326, 14629, 14933, 15238, 15545, 15854, 16164, 16476, 16789, 17104,
+      17420, 17737, 18055, 18375, 18696, 19019, 19343, 19667, 19994, 20321, 20649, 20979, 21309,
+      21641, 21974, 22308, 22643, 22978, 23315, 23653, 23991, 24331, 24671, 25013, 25355, 25698,
+      26041, 26386, 26731, 27077, 27424, 27771, 28120, 28468, 28818, 29168, 29518, 29870, 30221,
+      30574, 30926, 31280, 31633, 31988, 32342, 32697, 33053, 33409, 33765, 34122, 34479, 34836,
+      35193, 35551, 35909, 36267, 36626, 36985, 37344, 37703, 38062, 38421, 38781, 39140, 39500,
+      39859, 40219, 40579, 40938, 41298, 41657, 42017, 42376, 42736, 43095, 43454, 43813, 44171,
+      44530, 44888, 45246, 45604, 45962, 46319, 46676, 47032, 47389, 47744, 48100, 48455, 48810,
+      49164, 49518, 49871, 50224, 50576, 50928, 51279, 51630, 51980, 52329, 52678, 53026, 53373,
+      53720, 54066, 54411, 54756, 55100, 55443, 55785, 56126, 56466, 56806, 57145, 57482, 57819,
+      58155, 58490, 58823, 59156, 59488, 59819, 60148, 60477, 60804, 61130, 61455, 61779, 62101,
+      62422, 62742, 63061, 63378, 63694, 64008, 64321, 64633, 64943, 65252, 65559, 65865, 66169,
+      66472, 66772, 67072, 67369, 67665, 67959, 68251, 68542, 68831, 69117, 69402, 69685, 69966,
+      70245, 70522, 70797, 71070, 71341, 71609, 71876, 72140, 72401, 72661, 72918, 73173, 73425,
+      73674, 73922, 74166, 74408, 74647, 74883, 75117, 75348, 75576, 75800, 76022, 76241, 76456,
+      76669, 76878, 77083, 77285, 77484, 77679, 77870, 78057, 78240, 78420, 78595, 78765, 78932,
+      79094, 79251, 79403, 79550, 79691, 79827, 79957, 80081, 80199, 80309, 80413, 80508, 80594,
+      80670, 80735, 80785
+    ]
+  },
+  // Tank 25: 100.000 l. Durchmesser 2900 mm; letzte Tabellenhöhe: 288 cm
+  {
+    capacity: 100000,
+    diameter: 2900,
+    length: 15895,
+    cylinder: 14960,
+    values: [
+      0, 35, 97, 177, 272, 380, 499, 628, 767, 914, 1070, 1233, 1404,
+      1582, 1767, 1958, 2155, 2359, 2568, 2782, 3002, 3228, 3458, 3694, 3934, 4179,
+      4428, 4682, 4940, 5203, 5470, 5740, 6015, 6294, 6576, 6862, 7152, 7446, 7743,
+      8043, 8347, 8654, 8964, 9277, 9594, 9914, 10236, 10562, 10891, 11222, 11556, 11893,
+      12233, 12575, 12920, 13268, 13618, 13970, 14325, 14682, 15042, 15404, 15769, 16135, 16504,
+      16875, 17248, 17623, 18000, 18379, 18760, 19144, 19529, 19915, 20304, 20695, 21087, 21481,
+      21877, 22275, 22674, 23074, 23477, 23881, 24286, 24693, 25102, 25512, 25923, 26336, 26750,
+      27165, 27582, 28000, 28419, 28839, 29261, 29684, 30108, 30533, 30959, 31386, 31814, 32244,
+      32674, 33105, 33537, 33970, 34404, 34839, 35274, 35711, 36148, 36586, 37025, 37464, 37904,
+      38345, 38787, 39229, 39671, 40114, 40558, 41002, 41447, 41892, 42338, 42784, 43231, 43678,
+      44125, 44572, 45020, 45468, 45917, 46366, 46815, 47264, 47713, 48162, 48612, 49062, 49511,
+      49961, 50411, 50861, 51311, 51761, 52210, 52660, 53110, 53559, 54008, 54458, 54907, 55355,
+      55804, 56252, 56700, 57147, 57595, 58041, 58488, 58934, 59380, 59825, 60270, 60714, 61158,
+      61601, 62044, 62486, 62927, 63368, 63808, 64247, 64686, 65124, 65561, 65998, 66433, 66868,
+      67302, 67735, 68167, 68599, 69029, 69458, 69886, 70314, 70740, 71165, 71589, 72012, 72433,
+      72854, 73273, 73691, 74108, 74523, 74937, 75350, 75761, 76171, 76580, 76987, 77392, 77796,
+      78199, 78599, 78999, 79396, 79792, 80186, 80578, 80969, 81358, 81745, 82130, 82513, 82894,
+      83274, 83651, 84026, 84399, 84770, 85139, 85506, 85870, 86232, 86592, 86949, 87304, 87657,
+      88007, 88355, 88700, 89042, 89382, 89719, 90053, 90385, 90714, 91039, 91362, 91682, 91999,
+      92312, 92623, 92930, 93234, 93534, 93832, 94125, 94415, 94701, 94984, 95263, 95538, 95809,
+      96076, 96339, 96597, 96852, 97101, 97347, 97587, 97823, 98054, 98279, 98500, 98715, 98924,
+      99128, 99326, 99517, 99702, 99881, 100052, 100216, 100373, 100521, 100660, 100790, 100910, 101019,
+      101115, 101197, 101261
+    ]
+  }
+  ];
+
+  /* ================================================================
+     2. KLEINE HILFSFUNKTIONEN
+     ================================================================ */
+
+  // Kurze Schreibweise zum Finden eines Elements anhand seiner ID.
+  function byId(id) { return document.getElementById(id); }
+
+  // Zahlen im deutschen Format ausgeben, z. B. 12345.6 -> "12.345,6".
+  const format = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 });
+  const format2 = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 2 });
+
+  // Eingaben erlauben Dezimalkomma und Dezimalpunkt sowie Tausenderpunkte.
+  // Beispiel: "1.234,5" -> 1234.5; "1234.5" -> 1234.5.
+  function parseInput(text) {
+    const s = String(text).trim().replace(/\s/g, "");
+    // Überlange Eingaben nicht weiterverarbeiten (auch bei JS-Manipulation).
+    if (!s || s.length > 32) return NaN;
+    let normalized = s;
+    if (s.indexOf(",") !== -1) {
+      normalized = s.replace(/\./g, "").replace(",", ".");
+    } else if (/^\d{1,3}(\.\d{3})+$/.test(s)) {
+      normalized = s.replace(/\./g, "");
+    }
+    return /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalized)
+      ? Number(normalized) : NaN;
+  }
+
+  // Liefert die Tankvariante, z. B. 10.000 l / Ø 160 cm (intern 1600 mm).
+  function selectedTank(prefix) {
+    const cap = Number(byId(prefix + "-capacity").value);
+    const dia = Number(byId(prefix + "-diameter").value);
+    return TANKS.find(function (tank) {
+      return tank.capacity === cap && tank.diameter === dia;
+    });
+  }
+
+  // Die Optionen zeigen cm, speichern aber unverändert die Tabellen-mm-Werte.
+  // So bleibt die gesamte bisherige Geometrie-/Peiltabellenrechnung korrekt.
+  // Schreibt die passenden Durchmesser in das zweite Auswahlfeld.
+  // Beim Ändern des Nenninhalts bleiben nur passende Durchmesser sichtbar.
+  function updateDiameterOptions(prefix) {
+    const select = byId(prefix + "-diameter");
+    const capacity = Number(byId(prefix + "-capacity").value);
+    const oldDiameter = Number(select.value);
+    const matching = TANKS.filter(function (t) { return t.capacity === capacity; });
+    select.textContent = "";
+    matching.forEach(function (tank) {
+      const option = document.createElement("option");
+      option.value = String(tank.diameter);
+      option.textContent = format.format(tank.diameter / 10) + " cm";
+      select.appendChild(option);
+    });
+    // Den bisher gewählten Durchmesser nach Möglichkeit beibehalten.
+    if (matching.some(function (t) { return t.diameter === oldDiameter; })) {
+      select.value = String(oldDiameter);
+    }
+  }
+
+  // Umrechnung Füllhöhe -> Literzahl für genau eine Tankvariante.
+  // Beispiel: 50.5 cm wird als Mittel zwischen 50 und 51 cm berechnet.
+  function litersAtHeight(tank, heightCm) {
+    const maxHeight = tank.values.length - 1;
+    if (!Number.isFinite(heightCm) || heightCm < 0 || heightCm > maxHeight) {
+      return NaN;
+    }
+    const lower = Math.floor(heightCm);
+    const upper = Math.ceil(heightCm);
+    const fraction = heightCm - lower;
+    return tank.values[lower] +
+      (tank.values[upper] - tank.values[lower]) * fraction;
+  }
+
+  // Umgekehrte Rechnung Literzahl -> Peilhöhe.
+  // Die Originalwerte steigen mit der Höhe; per binärer Suche finden wir
+  // das Wertepaar, zwischen dem der gewünschte Füllinhalt liegt.
+  function heightAtLiters(tank, liters) {
+    const values = tank.values;
+    if (!Number.isFinite(liters) || liters < values[0] || liters > values[values.length - 1]) {
+      return NaN;
+    }
+    let low = 0;
+    let high = values.length - 1;
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2);
+      if (values[mid] < liters) low = mid + 1;
+      else high = mid;
+    }
+    if (values[low] === liters) return low;
+    const below = low - 1;
+    return below + (liters - values[below]) / (values[low] - values[below]);
+  }
+
+  // Zeigt die technischen Abmessungen des jeweils ausgewählten Tanks.
+  function tankDescription(tank) {
+    return "Tank: " + format.format(tank.capacity) + " l · Ø " +
+      format.format(tank.diameter / 10) + " cm · Gesamtlänge " +
+      format.format(tank.length) + " mm · Zylinderlänge " +
+      format.format(tank.cylinder) + " mm";
+  }
+
+  /* ================================================================
+     OPTIONALE MEHRKAMMER-UMRECHNUNG IN REGISTER 1 UND 2
+     ================================================================
+
+     Die Hersteller-Tabelle bezieht sich stets auf den gesamten Tank.
+     Beispiel: Tank 80.000 l, Kammer 20.000 l -> Faktor = 0,25.
+
+     Vorwärts (Höhe -> Menge): Kammerliter = Tabellenliter * Faktor.
+     Rückwärts (Menge -> Höhe): Tabellenliter = Kammerliter / Faktor.
+
+     Voraussetzung dieser Näherung: Die Kammer besitzt über die Höhe
+     das gleiche proportionale Füllprofil wie der Gesamttank. Für Tanks
+     mit anderen Kammerformen kann diese Annahme unzutreffend sein.
+  */
+  function chamberSettings(prefix, tank) {
+    const enabled = byId(prefix + "-multi").checked;
+    const valueField = byId(prefix + "-chamber");
+    const hint = byId(prefix + "-chamber-hint");
+
+    // Ohne Häkchen bleibt die bisherige Rechnung unverändert (Faktor 1).
+    if (!enabled) return { enabled: false, valid: true, factor: 1, capacity: tank.capacity };
+
+    const capacity = parseInput(valueField.value);
+    if (!Number.isFinite(capacity) || capacity <= 0 || capacity > tank.capacity) {
+      hint.textContent = "Erlaubt: größer als 0 und höchstens " +
+        format.format(tank.capacity) + " Liter.";
+      return { enabled: true, valid: false, factor: NaN, capacity: NaN };
+    }
+
+    const factor = capacity / tank.capacity;
+    hint.textContent = "Faktor " + format2.format(factor) +
+      " = " + format.format(capacity) + " / " + format.format(tank.capacity) +
+      ". Annahme: gleiche relative Füllkurve.";
+    return { enabled: true, valid: true, factor: factor, capacity: capacity };
+  }
+
+  // Zeigt das Eingabefeld beim Setzen des Häkchens an und blendet es sonst aus.
+  function toggleChamberField(prefix) {
+    const enabled = byId(prefix + "-multi").checked;
+    byId(prefix + "-chamber-wrap").hidden = !enabled;
+    byId(prefix + "-chamber").disabled = !enabled;
+  }
+
+  // Ein einzelner Hinweis für Fehler, damit kein alter Zahlenwert stehen bleibt.
+  function showCalculationError(prefix, resultId, detailId, message) {
+    byId(resultId).textContent = prefix === "v" ? "– Liter" : "– cm";
+    byId(detailId).textContent = "–";
+    byId(prefix + "-bar").style.width = "0%";
+    byId(prefix + "-error").textContent = message;
+  }
+
+  /* ================================================================
+     3. REGISTER 1: PEILHÖHE -> FÜLLMENGE
+     ================================================================ */
+  function calculateVolume() {
+    const tank = selectedTank("v");
+    if (!tank) return;
+
+    const maxHeight = tank.values.length - 1;
+    const height = parseInput(byId("v-height").value);
+    const chamber = chamberSettings("v", tank);
+    byId("v-range").textContent = "Gültiger Tabellenbereich: 0 bis " + maxHeight +
+      " cm (Tankdurchmesser " + tank.diameter / 10 + " cm).";
+    byId("v-meta").textContent = tankDescription(tank) +
+      (chamber.enabled && chamber.valid ? " · Kammer " +
+        format.format(chamber.capacity) + " l · Faktor " + format2.format(chamber.factor) : "");
+
+    // Eine ungültige Kammergröße darf keine scheinbar gültige Literzahl ergeben.
+    if (!chamber.valid) {
+      showCalculationError("v", "v-amount", "v-percent", "Bitte eine Kammergröße größer als 0 und höchstens " +
+        format.format(tank.capacity) + " Liter eingeben.");
+      return;
+    }
+
+    const totalTankLiters = litersAtHeight(tank, height);
+    if (!Number.isFinite(totalTankLiters)) {
+      showCalculationError("v", "v-amount", "v-percent", "Bitte eine Peilhöhe zwischen 0 und " +
+        maxHeight + " cm eingeben.");
+      return;
+    }
+
+    // Beispiel: 80.000-l-Tank, 20.000-l-Kammer -> Ergebnis * 0,25.
+    const liters = totalTankLiters * chamber.factor;
+    const percent = liters / chamber.capacity * 100;
+    byId("v-amount").textContent = format.format(liters) + " Liter";
+    byId("v-percent").textContent = format.format(percent) +
+      (chamber.enabled ? " % der Kammergröße" : " % des Nenninhalts") + " · " +
+      (Number.isInteger(height) ? "Tabellenhöhe" : "Linear interpoliert") +
+      (chamber.enabled ? " · proportional umgerechnet" : "");
+    byId("v-bar").style.width = Math.max(0, Math.min(100, percent)) + "%";
+    byId("v-error").textContent = "";
+  }
+
+  /* ================================================================
+     4. REGISTER 2: FÜLLMENGE -> PEILHÖHE
+     ================================================================ */
+  function calculateHeight() {
+    const tank = selectedTank("h");
+    if (!tank) return;
+    const chamber = chamberSettings("h", tank);
+    const liters = parseInput(byId("h-volume").value);
+    const maxTankLiters = tank.values[tank.values.length - 1];
+    const maxLiters = chamber.valid ? maxTankLiters * chamber.factor : NaN;
+    byId("h-range").textContent = chamber.valid ?
+      "Tabellierter Bereich: 0 bis " + format.format(maxLiters) +
+        (chamber.enabled ? " Liter in dieser Kammer." : " Liter.") :
+      "Bitte zuerst eine gültige Kammergröße eingeben.";
+    byId("h-meta").textContent = tankDescription(tank) +
+      (chamber.enabled && chamber.valid ? " · Kammer " +
+        format.format(chamber.capacity) + " l · Faktor " + format2.format(chamber.factor) : "");
+
+    if (!chamber.valid) {
+      showCalculationError("h", "h-result", "h-percent", "Bitte eine Kammergröße größer als 0 und höchstens " +
+        format.format(tank.capacity) + " Liter eingeben.");
+      return;
+    }
+
+    // Zuerst die eingegebene Kammermenge auf die Vergleichs-Tankmenge umrechnen.
+    // Beispiel: 5.000 l in einer 20.000-l-Kammer -> 20.000 l im 80.000-l-Tank.
+    const litersForFullTank = liters / chamber.factor;
+    const height = heightAtLiters(tank, litersForFullTank);
+    if (!Number.isFinite(height)) {
+      showCalculationError("h", "h-result", "h-percent", "Bitte eine Füllmenge zwischen 0 und " +
+        format.format(maxLiters) + " Litern eingeben.");
+      return;
+    }
+
+    const percent = liters / chamber.capacity * 100;
+    byId("h-result").textContent = format2.format(height) + " cm";
+    byId("h-percent").textContent = format.format(percent) +
+      (chamber.enabled ? " % der Kammergröße" : " % des Nenninhalts") + " · " +
+      (Number.isInteger(height) ? "Tabellenhöhe" : "Linear interpoliert") +
+      (chamber.enabled ? " · proportional umgerechnet" : "");
+    byId("h-bar").style.width = Math.max(0, Math.min(100, percent)) + "%";
+    byId("h-error").textContent = "";
+  }
+
+  /* ================================================================
+     5. REGISTER 3: TANKVOLUMEN BEI BEKANNTEM DURCHMESSER SUCHEN
+     ================================================================
+     Eingaben:
+       - Tankdurchmesser in cm angezeigt (intern als mm gespeichert)
+       - zwei Peilhöhen in cm (vor und nach Befüllen/Entnehmen)
+       - gemessene Mengendifferenz in Litern
+
+     Vorgehen:
+       1. Ausschließlich Tankmodelle mit gewähltem Durchmesser prüfen.
+       2. Aus beiden Peilhöhen die zugehörigen Tabellenliter berechnen.
+       3. Den absoluten Literunterschied mit der Messung vergleichen.
+       4. Mögliche Nenninhalte aufsteigend nach Abweichung anzeigen.
+
+     Die grüne 3-%-Markierung ist nur eine SUCHHILFE. In der
+     Hersteller-PDF stehen ±3 % für mögliche Inhaltsabweichungen,
+     NICHT für eine garantierte Toleranz der gemessenen Differenz.
+  */
+  /* ================================================================
+     REGISTER 3 – OPTIONAL: UNBEKANNTE KAMMERGRÖSSE
+     ================================================================
+     Eingaben: bekannter Durchmesser D, zwei Peilhöhen h1 und h2 sowie
+     die dazwischen gemessene Mengendifferenz ΔV.
+
+     Die Füllmenge eines waagerechten Kreiszylinders ist proportional zur
+     gefüllten Kreisabschnittsfläche. Deren Anteil an der Kreisfläche ist:
+       f(h) = [acos(x) - x * sqrt(1 - x²)] / π,
+       mit x = (r - h) / r und r = D / 2.
+
+     Der Unterschied der Füllanteile bestimmt den Mengenunterschied:
+       ΔV = V_kammer * |f(h2) - f(h1)|
+     Daraus folgt für die gesuchte Kammergröße:
+       V_kammer = ΔV / |f(h2) - f(h1)|
+
+     Das bestimmt die Kammergröße unter der Zylinderannahme, nicht aber
+     die Gesamtlänge und damit NICHT den Inhalt des gesamten Tanks.
+  */
+
+  // Anteil des Kreisquerschnitts, der bis zur gemessenen Höhe gefüllt ist.
+  function cylinderFillFraction(heightCm, diameterMm) {
+    const diameterCm = diameterMm / 10;
+    if (!Number.isFinite(heightCm) || heightCm < 0 || heightCm > diameterCm) return NaN;
+    const radiusCm = diameterCm / 2;
+    const x = Math.max(-1, Math.min(1, (radiusCm - heightCm) / radiusCm));
+    return (Math.acos(x) - x * Math.sqrt(Math.max(0, 1 - x * x))) / Math.PI;
+  }
+
+  // Beim Umschalten bleiben alle vier Eingabefelder an derselben Stelle.
+  // Nur Ergebnisdarstellung und Erklärung wechseln zum Mehrkammermodus.
+  function toggleIdentifyChamber() {
+    const multi = byId("i-multi").checked;
+    byId("i-chamber-result").hidden = !multi;
+    byId("i-single-note").hidden = multi;
+    byId("i-chamber-note").hidden = !multi;
+    byId("i-results-heading").textContent = multi ?
+      "Mögliche Gesamttankgrößen (nicht eindeutig)" : "Mögliche Tankvolumen";
+    byId("i-description").textContent = multi ?
+      "Tankdurchmesser, zwei Peilhöhen und die Mengendifferenz angeben. Aus diesen Werten wird die Größe der betrachteten Kammer geschätzt. Das Gesamtvolumen des Tanks ist damit nicht eindeutig bestimmbar." :
+      "Wähle den bekannten Tankdurchmesser und gib zwei Peilhöhen sowie die dazwischen eingefüllte oder entnommene Menge ein. Der Rechner sucht ausschließlich nach passenden Tankvolumen.";
+    calculateCandidates();
+  }
+
+  function calculateUnknownChamber() {
+    const h1 = parseInput(byId("i-height1").value);
+    const h2 = parseInput(byId("i-height2").value);
+    const delta = parseInput(byId("i-delta").value);
+    const diameter = Number(byId("i-diameter").value);
+    const error = byId("i-error");
+    const list = byId("i-matches");
+    const count = byId("i-count");
+    const resultValue = byId("i-chamber-liters");
+    const resultDetails = byId("i-chamber-details");
+
+    // Vor jedem neuen Rechenschritt Ergebnisse zurücksetzen.
+    list.textContent = "";
+    count.textContent = "";
+    resultValue.textContent = "– Liter";
+    resultDetails.textContent = "–";
+    error.textContent = "";
+
+    if (![h1, h2, delta, diameter].every(Number.isFinite)) {
+      list.appendChild(emptyMessage("Bitte zwei Peilhöhen und eine Mengendifferenz eingeben."));
+      return;
+    }
+    const diameterCm = diameter / 10;
+    if (h1 < 0 || h2 < 0 || h1 > diameterCm || h2 > diameterCm ||
+        h1 === h2 || delta <= 0 || diameter <= 0) {
+      error.textContent = "Die Peilhöhen müssen zwischen 0 und " +
+        format2.format(diameterCm) + " cm liegen und verschieden sein. Die Mengendifferenz muss positiv sein.";
+      list.appendChild(emptyMessage("Eingaben korrigieren."));
+      return;
+    }
+
+    const f1 = cylinderFillFraction(h1, diameter);
+    const f2 = cylinderFillFraction(h2, diameter);
+    const fractionDiff = Math.abs(f2 - f1);
+    if (!Number.isFinite(fractionDiff) || fractionDiff < 1e-8) {
+      error.textContent = "Die beiden Peilhöhen liegen zu nah beieinander. Bitte einen größeren Höhenunterschied messen.";
+      list.appendChild(emptyMessage("Keine belastbare Volumenberechnung möglich."));
+      return;
+    }
+
+    // Kammer-Nennvolumen aus gemessener Menge und Anteil der Zylinderfläche.
+    const estimated = delta / fractionDiff;
+    // Aus V = π * r² * L ergibt sich die zylindrische Kammerlänge.
+    const radiusMeter = diameter / 2000;
+    const chamberLengthMeter = (estimated / 1000) / (Math.PI * radiusMeter * radiusMeter);
+    if (!Number.isFinite(estimated) || !Number.isFinite(chamberLengthMeter)) {
+      error.textContent = "Die Mengendifferenz ist zu groß. Bitte Messwerte prüfen.";
+      list.appendChild(emptyMessage("Keine belastbare Volumenberechnung möglich."));
+      return;
+    }
+
+    resultValue.textContent = format.format(estimated) + " Liter";
+    resultDetails.textContent = "Kammerlänge (rechnerisch): " +
+      format2.format(chamberLengthMeter) + " m · Änderung des Füllanteils: " +
+      format2.format(fractionDiff * 100) + " %.";
+    if (fractionDiff < 0.02) {
+      error.textContent = "Hinweis: Die Höhenänderung entspricht weniger als 2 % der Kammerfüllmenge. Kleine Messfehler können das Ergebnis stark beeinflussen.";
+    }
+
+    // Gesamtvolumen bleibt unbekannt: nur Varianten desselben Durchmessers
+    // mit mindestens dem ermittelten Kammervolumen kommen grundsätzlich infrage.
+    const possibilities = TANKS.filter(function (tank) {
+      return tank.diameter === diameter && tank.capacity >= estimated;
+    }).sort(function (a, b) { return a.capacity - b.capacity; });
+    if (!possibilities.length) {
+      count.textContent = "0 Tabellenvarianten";
+      list.appendChild(emptyMessage("Keine hinterlegte Gesamttank-Variante mit Ø " +
+        format.format(diameter / 10) + " cm ist mindestens so groß wie die berechnete Kammer. Sondertanks sind möglich."));
+      return;
+    }
+    count.textContent = possibilities.length + " mögliche Tabellenvarianten";
+    possibilities.forEach(function (tank) {
+      const item = document.createElement("div");
+      item.className = "match";
+      const title = document.createElement("div");
+      title.className = "match-title";
+      title.textContent = format.format(tank.capacity) + " Liter Gesamttank";
+      const info = document.createElement("div");
+      info.className = "match-details";
+      info.textContent = "Die geschätzte Kammer entspräche " +
+        format2.format(estimated / tank.capacity * 100) +
+        " % des Gesamttanks. Keine eindeutige Identifikation.";
+      item.appendChild(title);
+      item.appendChild(info);
+      list.appendChild(item);
+    });
+  }
+
+  function calculateCandidates() {
+    // Bei aktiviertem Mehrkammertank die geometrische Kammerberechnung wählen.
+    if (byId("i-multi").checked) {
+      calculateUnknownChamber();
+      return;
+    }
+    const height1 = parseInput(byId("i-height1").value);
+    const height2 = parseInput(byId("i-height2").value);
+    const enteredDelta = parseInput(byId("i-delta").value);
+    const diameter = Number(byId("i-diameter").value);
+    const errors = byId("i-error");
+    const list = byId("i-matches");
+    const count = byId("i-count");
+
+    // Vorherige Ergebnisse entfernen, damit keine veralteten Zahlen stehenbleiben.
+    list.textContent = "";
+    if (!Number.isFinite(height1) || !Number.isFinite(height2) ||
+        height1 < 0 || height2 < 0 || height1 === height2 ||
+        !Number.isFinite(enteredDelta) || enteredDelta <= 0 ||
+        !Number.isFinite(diameter) || diameter <= 0) {
+      errors.textContent = "Bitte einen Durchmesser, zwei unterschiedliche, nicht negative Peilhöhen und eine positive Mengendifferenz eingeben.";
+      count.textContent = "";
+      list.appendChild(emptyMessage("Noch keine gültigen Vergleichswerte."));
+      return;
+    }
+    errors.textContent = "";
+
+    // Alle anderen Durchmesser konsequent ausschließen.
+    const matchingDiameter = TANKS.filter(function (tank) {
+      return tank.diameter === diameter;
+    });
+    const matches = [];
+    matchingDiameter.forEach(function (tank) {
+      const v1 = litersAtHeight(tank, height1);
+      const v2 = litersAtHeight(tank, height2);
+      // Bei außerhalb der Tabellen liegenden Höhen keine Werte schätzen.
+      if (!Number.isFinite(v1) || !Number.isFinite(v2)) return;
+      const predicted = Math.abs(v2 - v1);
+      const errorLiters = Math.abs(predicted - enteredDelta);
+      const errorPercent = errorLiters / enteredDelta * 100;
+      matches.push({ tank: tank, predicted: predicted,
+        errorLiters: errorLiters, errorPercent: errorPercent });
+    });
+
+    // Zuerst die kleinste Literabweichung; bei Gleichstand kleinerer Tank.
+    matches.sort(function (a, b) {
+      return a.errorLiters - b.errorLiters || a.tank.capacity - b.tank.capacity;
+    });
+    if (!matches.length) {
+      errors.textContent = "Für Ø " + format.format(diameter / 10) +
+        " cm liegen die Peilhöhen außerhalb des verfügbaren Tabellenbereichs.";
+      count.textContent = "0 Tankvolumen";
+      list.appendChild(emptyMessage("Andere Peilhöhen eingeben oder den Tankdurchmesser prüfen."));
+      return;
+    }
+
+    // Bei mindestens einem gut passenden Tank nur diese anzeigen.
+    // Sonst zeigen wir alle verfügbaren Tankvolumen als Vergleich.
+    const closeMatches = matches.filter(function (m) { return m.errorPercent <= 3; });
+    const shown = closeMatches.length ? closeMatches : matches;
+    count.textContent = closeMatches.length ?
+      closeMatches.length + " von " + matches.length + " innerhalb ±3 %" :
+      "Kein Treffer innerhalb ±3 % · " + matches.length + " Vergleichswerte";
+
+    shown.forEach(function (match) {
+      const item = document.createElement("div");
+      item.className = "match" + (match.errorPercent <= 3 ? " good" : "");
+      const first = document.createElement("div");
+      first.className = "match-main";
+      const name = document.createElement("span");
+      name.className = "match-title";
+      // Nur den gesuchten Nenninhalt anzeigen, nicht erneut Durchmesser/Länge.
+      name.textContent = format.format(match.tank.capacity) + " Liter";
+      const delta = document.createElement("span");
+      delta.className = "match-delta";
+      delta.textContent = format2.format(match.errorPercent) + " % Abweichung";
+      first.appendChild(name);
+      first.appendChild(delta);
+
+      const details = document.createElement("div");
+      details.className = "match-details";
+      details.textContent = "Berechnete Mengendifferenz: " +
+        format.format(match.predicted) + " l · Abweichung: " +
+        format.format(match.errorLiters) + " l";
+
+      // Die passende Variante kann bei Bedarf in Register 1 übernommen werden.
+      const action = document.createElement("button");
+      action.type = "button";
+      action.className = "match-action";
+      action.textContent = "Füllmenge für diesen Tank anzeigen →";
+      action.addEventListener("click", function () {
+        byId("v-capacity").value = String(match.tank.capacity);
+        updateDiameterOptions("v");
+        byId("v-diameter").value = String(match.tank.diameter);
+        byId("v-height").value = String(height2).replace(".", ",");
+        calculateVolume();
+        openTab("volume");
+      });
+
+      item.appendChild(first);
+      item.appendChild(details);
+      item.appendChild(action);
+      list.appendChild(item);
+    });
+  }
+
+  // Kleiner Hinweis für leere oder ungültige Vergleichsergebnisse.
+  function emptyMessage(message) {
+    const paragraph = document.createElement("p");
+    paragraph.className = "empty";
+    paragraph.textContent = message;
+    return paragraph;
+  }
+
+  /* ================================================================
+     6. REGISTERWECHSEL UND EREIGNISSE
+     ================================================================ */
+
+  // Ein Register anzeigen und die beiden anderen ausblenden.
+  function openTab(name) {
+    ["volume", "height", "identify"].forEach(function (tabName) {
+      const active = tabName === name;
+      byId("panel-" + tabName).hidden = !active;
+      byId("tab-" + tabName).setAttribute("aria-selected", String(active));
+    });
+  }
+
+  document.querySelectorAll(".tab").forEach(function (button) {
+    button.addEventListener("click", function () { openTab(button.dataset.target); });
+  });
+
+  // Tankgröße/Durchmesser ändern: Dropdown aktualisieren und neu rechnen.
+  ["v", "h"].forEach(function (prefix) {
+    const recalculate = prefix === "v" ? calculateVolume : calculateHeight;
+    byId(prefix + "-capacity").addEventListener("change", function () {
+      updateDiameterOptions(prefix);
+      recalculate();
+    });
+    byId(prefix + "-diameter").addEventListener("change", recalculate);
+    // Optionales Häkchen und Kammergröße lösen ebenfalls eine Neuberechnung aus.
+    byId(prefix + "-multi").addEventListener("change", function () {
+      toggleChamberField(prefix);
+      recalculate();
+    });
+    byId(prefix + "-chamber").addEventListener("input", recalculate);
+  });
+
+  // Während der Eingabe direkt neu rechnen (auch auf dem Smartphone).
+  byId("v-height").addEventListener("input", calculateVolume);
+  byId("h-volume").addEventListener("input", calculateHeight);
+  ["i-height1", "i-height2", "i-delta"].forEach(function (id) {
+    byId(id).addEventListener("input", calculateCandidates);
+  });
+  // Für ein neu gewähltes Maß nur dessen Tankvolumen vergleichen.
+  byId("i-diameter").addEventListener("change", calculateCandidates);
+  byId("i-multi").addEventListener("change", toggleIdentifyChamber);
+
+  /*
+     7. LINK ZUM OFFLINE-SPEICHERN NUR AUF GITHUB PAGES
+     ------------------------------------------------
+     Lokale Dateien verwenden das Protokoll file: und haben keinen
+     GitHub-Pages-Hostnamen. Für sie bleibt der Link ausgeblendet.
+     Ein veröffentlichter GitHub-Pages-Link läuft über HTTPS und z. B.
+     nutzername.github.io. Auch mit deaktiviertem JavaScript ist der Link
+     unsichtbar, weil "hidden" bereits im HTML gesetzt ist.
+  */
+  function istGitHubPagesAdresse(protokoll, hostname) {
+    const host = hostname.toLowerCase();
+    return protokoll === "https:" && (host === "github.io" || host.endsWith(".github.io"));
+  }
+  const aufGitHubPages = istGitHubPagesAdresse(window.location.protocol, window.location.hostname);
+  byId("download-row").hidden = !aufGitHubPages;
+
+  // Startwerte beim Laden aufbauen; es ist keine Netzwerkverbindung nötig.
+  updateDiameterOptions("v");
+  updateDiameterOptions("h");
+  toggleChamberField("v");
+  toggleChamberField("h");
+  calculateVolume();
+  calculateHeight();
+  toggleIdentifyChamber();
+</script>
+</body>
+</html>
